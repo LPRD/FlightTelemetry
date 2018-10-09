@@ -1,36 +1,18 @@
 #include <Wire.h>
-#include <Servo.h>
 #include <SPI.h>
 #include <SD.h>
 #include <RTClib.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
-#include <utility/imumaths.h>
 #include <avr/pgmspace.h>
 #include <Telemetry.h>
 
-long    launchTime = 0;
-int     accel;
-
 Adafruit_BNO055 bno = Adafruit_BNO055(55);
-Servo servo1;
-Servo servo2;
 RTC_DS1307 RTC;
 File dataFile;
 char filename[] = "DATA000.csv";
 
 #define LED           10
-#define data_size     3         // uses 0 (data_size-1 valid data points)
-#define loopDelay     100       // min 200 to avoid missing deadlines (100 is fairly stable)
-#define SDdelay       10
-#define flagIncrement 10
-#define sdErrorLimit  2
-#define saveInterval  3000
-#define dataTime ((float)loopDelay)/1000      // time between data
-float eulerNew,eulerOld;
-int i, j;
-int flag = 0;
-long checkSD,saveFlag;
 
 #define SEND_VECTOR_ITEM(field, value)\
   SEND_ITEM(field, value.x())         \
@@ -93,7 +75,7 @@ void loop() {
   END_SEND
   
   // Writing to SD Card
-  DateTime now = RTC.now();           checkSD = millis();     // checks for SD removal
+  DateTime now = RTC.now();
   dataFile.print(millis());           dataFile.print(',');
   dataFile.print(now.year()  ,DEC);   dataFile.print('/');
   dataFile.print(now.month() ,DEC);   dataFile.print('/');
