@@ -48,7 +48,7 @@ void setup() {
         dataFile = SD.open(filename, FILE_WRITE);
         Serial.print(F("\twriting "));
         Serial.println(filename);
-        dataFile.println(F("abs time,sys date,sys time,x_euler_angle,y_euler_angle,z_euler_angle,x_gyro,y_gyro,z_gyro,temperature,x_magnetometer,y_magnetometer,z_magnetometer,x_accelerometer,y_accelerometer,z_accelerometer,"));
+        dataFile.println(F("abs time,sys date,sys time,x_euler_angle,y_euler_angle,z_euler_angle,x_gyro,y_gyro,z_gyro,temperature,x_magnetometer,y_magnetometer,z_magnetometer,x_acceleration,y_acceleration,z_acceleration,"));
         break;
       }
     }
