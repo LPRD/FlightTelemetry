@@ -8,7 +8,7 @@
 #include <Telemetry.h>
 
 Adafruit_BNO055 bno = Adafruit_BNO055(55);
-RTC_DS1307 RTC;
+RTC_DS1307 rtc;
 File dataFile;
 char filename[] = "DATA000.csv";
 
@@ -31,13 +31,13 @@ unsigned int missed_deadlines = 0;
 
 
 void setup() {
-  Serial.begin(38400, SERIAL_8N2);    Serial.println();
+  Serial.begin(38400);    Serial.println();
   
   while (!bno.begin()) {                            // flashes to signal error
     Serial.println(F("BNO055 err"));
     digitalWrite(LED,LOW); delay(1000); digitalWrite(LED,HIGH);
   }
-  if (!RTC.isrunning()) { RTC.adjust(DateTime(__DATE__, __TIME__)); }
+  if (!rtc.isrunning()) { rtc.adjust(DateTime(__DATE__, __TIME__)); }
   if (!SD.begin(10)) { Serial.println(F("SD err")); }
   else {                                            // generates file name
     for (uint16_t nameCount = 0; nameCount < 1000; nameCount++) {
@@ -75,7 +75,7 @@ void loop() {
   END_SEND
   
   // Writing to SD Card
-  DateTime now = RTC.now();
+  DateTime now = rtc.now();
   dataFile.print(millis());           dataFile.print(',');
   dataFile.print(now.year()  ,DEC);   dataFile.print('/');
   dataFile.print(now.month() ,DEC);   dataFile.print('/');
