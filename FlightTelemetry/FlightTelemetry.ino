@@ -5,6 +5,8 @@
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h>
 #include <avr/pgmspace.h>
+
+#define TELEMETRY_SERIAL Serial1
 #include <Telemetry.h>
 
 Adafruit_BNO055 bno = Adafruit_BNO055(55);
@@ -31,14 +33,14 @@ unsigned int missed_deadlines = 0;
 
 
 void setup() {
-  Serial.begin(38400);    Serial.println();
+  TELEMETRY_SERIAL.begin(38400);    TELEMETRY_SERIAL.println();
   
   while (!bno.begin()) {                            // flashes to signal error
-    Serial.println(F("BNO055 err"));
+    TELEMETRY_SERIAL.println(F("BNO055 err"));
     digitalWrite(LED,LOW); delay(1000); digitalWrite(LED,HIGH);
   }
   if (!rtc.isrunning()) { rtc.adjust(DateTime(__DATE__, __TIME__)); }
-  if (!SD.begin(10)) { Serial.println(F("SD err")); }
+  if (!SD.begin(10)) { TELEMETRY_SERIAL.println(F("SD err")); }
   else {                                            // generates file name
     for (uint16_t nameCount = 0; nameCount < 1000; nameCount++) {
       filename[4] = nameCount/100 + '0';
@@ -46,8 +48,8 @@ void setup() {
       filename[6] = nameCount%10 + '0';
       if (!SD.exists(filename)) {                   // opens if file doesn't exist
         dataFile = SD.open(filename, FILE_WRITE);
-        Serial.print(F("\twriting "));
-        Serial.println(filename);
+        TELEMETRY_SERIAL.print(F("\twriting "));
+        TELEMETRY_SERIAL.println(filename);
         dataFile.println(F("abs time,sys date,sys time,x_euler_angle,y_euler_angle,z_euler_angle,x_gyro,y_gyro,z_gyro,temperature,x_magnetometer,y_magnetometer,z_magnetometer,x_acceleration,y_acceleration,z_acceleration"));
         break;
       }
