@@ -29,7 +29,7 @@ Adafruit_BMP3XX bmp(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK);  //software SPI
 
 
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);//ID, Address, Wire //use the syntax &Wire1, 2, ... for SDA1, 2, ...
-RTC_DS1307 rtc;
+RTC_DS1307 rtc;                         //55 as the only argument also works
 File dataFile;
 char filename[] = "DATA000.csv";
 
