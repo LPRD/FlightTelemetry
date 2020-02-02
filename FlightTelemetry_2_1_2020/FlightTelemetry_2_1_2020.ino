@@ -14,7 +14,7 @@ static const uint32_t GPSBaud = 9600;
 TinyGPSPlus gps;
 
 //radio setup
-#define TELEMETRY_SERIAL Serial1 //Teensy 3.6 has to use Serial1 or higher
+#define TELEMETRY_SERIAL Serial //Teensy 3.6 has to use Serial1 or higher
 
 //BMP388 setup
 #define BMP_SCK 13
@@ -101,11 +101,11 @@ void loop() {
   imu::Vector<3> euler         = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
   imu::Vector<3> accelerometer = bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
   imu::Vector<3> magnetometer  = bno.getVector(Adafruit_BNO055::VECTOR_MAGNETOMETER);
-  int8_t temp = bno.getTemp();
+  double temp = bno.getTemp();
     double bmp_temp= bmp.temperature; //in Celcius, do I need int8_t type????
     double bmp_pressure= bmp.pressure / 100.0; //hPa or mbar 
   double bmp_alt= bmp.readAltitude(SEALEVELPRESSURE_HPA); //m
-    int16_t sats= gps.satellites.value();
+  int16_t sats= gps.satellites.value();
     float fix_hdop= gps.hdop.hdop(); //horiz. diminution of precision
   double gps_lat= gps.location.lat();
   double gps_lon= gps.location.lng();
@@ -119,6 +119,7 @@ void loop() {
     double x_to_land= TinyGPSPlus::distanceBetween(0, gps_lon, 0, land_lon);
     double y_to_land= TinyGPSPlus::distanceBetween(gps_lat, 0, land_lat, 0);
   //the indented values will be logged but not sent
+  smartDelay(500);
   
   // Downlink
   BEGIN_SEND
@@ -129,12 +130,21 @@ void loop() {
   SEND_VECTOR_ITEM(acceleration , accelerometer);
   SEND_ITEM(bmp_alt             , bmp_alt);
   SEND_ITEM(gps_alt             , gps_alt);
-  SEND_ITEM(gps_lat             , gps_lat);
-  SEND_ITEM(gps_lon             , gps_lon);
+  //SEND_ITEM(gps_lat             , gps_lat);
+  TELEMETRY_SERIAL.print(F(";"));               
+  TELEMETRY_SERIAL.print(F("gps_lat"));            
+  TELEMETRY_SERIAL.print(F(":"));               
+  TELEMETRY_SERIAL.print(gps_lat,8);//more digits of precision
+  //SEND_ITEM(gps_lon             , gps_lon);
+  TELEMETRY_SERIAL.print(F(";"));               
+  TELEMETRY_SERIAL.print(F("gps_lon"));            
+  TELEMETRY_SERIAL.print(F(":"));               
+  TELEMETRY_SERIAL.print(gps_lon,10);//more digits of precision
   SEND_ITEM(gps_vel             , gps_vel);
   SEND_ITEM(gps_dir             , gps_dir);
   SEND_ITEM(xy_from_lanch       , xy_from_lanch);
-  SEND_ITEM(dir_from_launch     , dir_from_launch);
+  SEND_ITEM(dir_from_launch     , dir_from_launch);sats
+  SEND_ITEM(sats                , sats);
   END_SEND
   
   // Writing to SD Card
@@ -171,4 +181,14 @@ void loop() {
   WRITE_CSV_ITEM(fix_hdop)
   dataFile.println();
   dataFile.flush();
+}
+
+static void smartDelay(unsigned long ms)
+{
+  unsigned long start = millis();
+  do 
+  {
+    while (Serial2.available())
+      gps.encode(Serial2.read());
+  } while (millis() - start < ms);
 }
