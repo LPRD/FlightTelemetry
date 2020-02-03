@@ -119,7 +119,7 @@ void loop() {
     double x_to_land= TinyGPSPlus::distanceBetween(0, gps_lon, 0, land_lon);
     double y_to_land= TinyGPSPlus::distanceBetween(gps_lat, 0, land_lat, 0);
   //the indented values will be logged but not sent
-  smartDelay(250);
+  smartDelay(200);
   
   // Downlink
   BEGIN_SEND
