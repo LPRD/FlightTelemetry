@@ -119,7 +119,7 @@ void loop() {
     double x_to_land= TinyGPSPlus::distanceBetween(0, gps_lon, 0, land_lon);
     double y_to_land= TinyGPSPlus::distanceBetween(gps_lat, 0, land_lat, 0);
   //the indented values will be logged but not sent
-  smartDelay(500);
+  smartDelay(250);
   
   // Downlink
   BEGIN_SEND
@@ -134,16 +134,16 @@ void loop() {
   TELEMETRY_SERIAL.print(F(";"));               
   TELEMETRY_SERIAL.print(F("gps_lat"));            
   TELEMETRY_SERIAL.print(F(":"));               
-  TELEMETRY_SERIAL.print(gps_lat,8);//more digits of precision
+  TELEMETRY_SERIAL.print(gps_lat,12);//more digits of precision
   //SEND_ITEM(gps_lon             , gps_lon);
   TELEMETRY_SERIAL.print(F(";"));               
   TELEMETRY_SERIAL.print(F("gps_lon"));            
   TELEMETRY_SERIAL.print(F(":"));               
-  TELEMETRY_SERIAL.print(gps_lon,10);//more digits of precision
+  TELEMETRY_SERIAL.print(gps_lon,14);//more digits of precision
   SEND_ITEM(gps_vel             , gps_vel);
   SEND_ITEM(gps_dir             , gps_dir);
   SEND_ITEM(xy_from_lanch       , xy_from_lanch);
-  SEND_ITEM(dir_from_launch     , dir_from_launch);sats
+  SEND_ITEM(dir_from_launch     , dir_from_launch);
   SEND_ITEM(sats                , sats);
   END_SEND
   
@@ -166,7 +166,9 @@ void loop() {
   WRITE_CSV_ITEM(bmp_alt)
   WRITE_CSV_ITEM(gps_alt)
   WRITE_CSV_ITEM(gps_lat)
+  
   WRITE_CSV_ITEM(gps_lon)
+  
   WRITE_CSV_ITEM(gps_vel)
   WRITE_CSV_ITEM(gps_dir)
   WRITE_CSV_ITEM(xy_from_lanch)
