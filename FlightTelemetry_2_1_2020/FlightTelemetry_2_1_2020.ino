@@ -14,7 +14,7 @@ static const uint32_t GPSBaud = 9600;
 TinyGPSPlus gps;
 
 //radio setup
-#define TELEMETRY_SERIAL Serial //Teensy 3.6 has to use Serial1 or higher
+#define TELEMETRY_SERIAL Serial1 //Teensy 3.6 has to use Serial1 or higher
 
 //BMP388 setup
 #define BMP_SCK 13
@@ -139,7 +139,7 @@ void loop() {
   TELEMETRY_SERIAL.print(F(";"));               
   TELEMETRY_SERIAL.print(F("gps_lon"));            
   TELEMETRY_SERIAL.print(F(":"));               
-  TELEMETRY_SERIAL.print(gps_lon,14);//more digits of precision
+  TELEMETRY_SERIAL.print(gps_lon,20);//more digits of precision
   SEND_ITEM(gps_vel             , gps_vel);
   SEND_ITEM(gps_dir             , gps_dir);
   SEND_ITEM(xy_from_lanch       , xy_from_lanch);
@@ -165,10 +165,10 @@ void loop() {
   WRITE_CSV_VECTOR_ITEM(accelerometer)
   WRITE_CSV_ITEM(bmp_alt)
   WRITE_CSV_ITEM(gps_alt)
-  WRITE_CSV_ITEM(gps_lat)
-  
-  WRITE_CSV_ITEM(gps_lon)
-  
+  //WRITE_CSV_ITEM(gps_lat) //change to have more precision
+  dataFile.print(F(", ")); dataFile.print(gps_lat,12);
+  //WRITE_CSV_ITEM(gps_lon) //change to have more precision
+  dataFile.print(F(", ")); dataFile.print(gps_lat,12);
   WRITE_CSV_ITEM(gps_vel)
   WRITE_CSV_ITEM(gps_dir)
   WRITE_CSV_ITEM(xy_from_lanch)
