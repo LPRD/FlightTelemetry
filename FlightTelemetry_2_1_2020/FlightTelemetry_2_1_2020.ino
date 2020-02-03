@@ -134,12 +134,12 @@ void loop() {
   TELEMETRY_SERIAL.print(F(";"));               
   TELEMETRY_SERIAL.print(F("gps_lat"));            
   TELEMETRY_SERIAL.print(F(":"));               
-  TELEMETRY_SERIAL.print(gps_lat,12);//more digits of precision
+  TELEMETRY_SERIAL.print(gps_lat,5);//more digits of precision
   //SEND_ITEM(gps_lon             , gps_lon);
   TELEMETRY_SERIAL.print(F(";"));               
   TELEMETRY_SERIAL.print(F("gps_lon"));            
   TELEMETRY_SERIAL.print(F(":"));               
-  TELEMETRY_SERIAL.print(gps_lon,20);//more digits of precision
+  TELEMETRY_SERIAL.print(gps_lon,5);//more digits of precision
   SEND_ITEM(gps_vel             , gps_vel);
   SEND_ITEM(gps_dir             , gps_dir);
   SEND_ITEM(xy_from_lanch       , xy_from_lanch);
@@ -166,9 +166,9 @@ void loop() {
   WRITE_CSV_ITEM(bmp_alt)
   WRITE_CSV_ITEM(gps_alt)
   //WRITE_CSV_ITEM(gps_lat) //change to have more precision
-  dataFile.print(F(", ")); dataFile.print(gps_lat,12);
+  dataFile.print(F(", ")); dataFile.print(gps_lat,8);
   //WRITE_CSV_ITEM(gps_lon) //change to have more precision
-  dataFile.print(F(", ")); dataFile.print(gps_lat,12);
+  dataFile.print(F(", ")); dataFile.print(gps_lat,8);
   WRITE_CSV_ITEM(gps_vel)
   WRITE_CSV_ITEM(gps_dir)
   WRITE_CSV_ITEM(xy_from_lanch)
