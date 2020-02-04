@@ -3,18 +3,23 @@
 #include <SD.h>
 #include <RTClib.h>
 #include <Adafruit_Sensor.h>
-#include <Adafruit_BNO055.h>
+#include <Adafruit_BNO055.h> //all 100hz except mag(20) and temp(1)
 #include <avr/pgmspace.h>
-#include <Adafruit_BMP3XX.h>
-#include <TinyGPS++.h>
+#include <Adafruit_BMP3XX.h>  //bmp.setOutputDataRate(BMP3_ODR_50_HZ);  ...ODR_200_HZ, _12_5_HZ, _3_1_HZ, _1_5_HZ, etc
+#include <TinyGPS++.h>  //10hz update rate, ~5 w/ RTK
 #include <Telemetry.h>
 
 //GPS setup
 static const uint32_t GPSBaud = 9600;
 TinyGPSPlus gps;
+#define gps_dt 100 //time in ms between samples for neo m8n GPS
 
 //radio setup
 #define TELEMETRY_SERIAL Serial1 //Teensy 3.6 has to use Serial1 or higher
+// 2/4/20 telem ACSII msgs are ~300 chars long= ~300 bytes ... 57600bits/s / (8bits+2extra)= 5760 bytes/s... = ~19 radio msgs/s MAX
+// 2-5 msgs/s is probably fine for the future, so we want ~600-1500 bytes/s, so no lower than 6000-15000 bits/s baud rate
+//I'm only showing the math here now b/c eventually we will want to lower the radio baud rates to get better range
+#define radio_dt 100 //time in ms between sending telemetry packets
 
 //BMP388 setup
 #define BMP_SCK 13
@@ -24,10 +29,12 @@ TinyGPSPlus gps;
 //Calibration Factor for BMP388, chech loacl pressure b4 flight!
 #define SEALEVELPRESSURE_HPA (1013.25)
 Adafruit_BMP3XX bmp(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK);  //software SPI
+#define bmp_dt 10 //time in ms between samples for bmp388
 
 //BNO setup
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);//ID, Address, Wire
 //use the syntax &Wire1, 2,... for SDA1, 2,... //55 as the only argument also works
+#define bno_dt 10 //time in ms between samples for bno055
 
 //internal clock setup
 RTC_DS1307 rtc;
@@ -35,8 +42,11 @@ RTC_DS1307 rtc;
 //SD logging setup
 File dataFile;
 char filename[] = "DATA000.csv";
+#define sd_dt 10 //time in ms between data points in csv file logging
+
 
 #define LED 13 //Error LED
+
 
 #define SEND_VECTOR_ITEM(field, value)\
   SEND_ITEM(field, value.x())         \
@@ -53,30 +63,45 @@ char filename[] = "DATA000.csv";
 
 unsigned int missed_deadlines = 0;
 
-#define launch_lat 44.975313
+//carry working gps to points and record positions
+#define launch_lat 44.975313  
 #define launch_lon -93.232216
 #define land_lat (44.975313+.00035)
 #define land_lon (-93.232216+.00035)
 
+long gpstimer= 0;
+long radiotimer= 0;
+long bmptimer= 0;
+long bnotimer= 0;
+long sdtimer= 0;
+
 void setup() {
+  
+     
   Serial2.begin(GPSBaud); //Serial2 is the radio
   TELEMETRY_SERIAL.begin(57600); TELEMETRY_SERIAL.println();
   
+  rtc.begin();  //ensures that rtc actually begins...
+  
   while (!bmp.begin()) {                         //flashes to signal error
     TELEMETRY_SERIAL.println(F("BMP388 err"));
-    digitalWrite(LED,LOW); delay(1000); digitalWrite(LED,HIGH);
+    digitalWrite(LED,LOW); delay(2000); digitalWrite(LED,HIGH);
   } 
   bmp.setTemperatureOversampling(BMP3_OVERSAMPLING_8X);
   bmp.setPressureOversampling(BMP3_OVERSAMPLING_4X);
   bmp.setIIRFilterCoeff(BMP3_IIR_FILTER_COEFF_3);
-
+  bmp.setOutputDataRate(BMP3_ODR_100_HZ);
+  
   while (!bno.begin()) {                         //flashes to signal error
     TELEMETRY_SERIAL.println(F("BNO055 err"));
     digitalWrite(LED,LOW); delay(1000); digitalWrite(LED,HIGH);
   }
   
   if (!rtc.isrunning()) { rtc.adjust(DateTime(__DATE__, __TIME__)); }
-  if (!SD.begin(BUILTIN_SDCARD)) { TELEMETRY_SERIAL.println(F("SD err")); }
+  if (!SD.begin(BUILTIN_SDCARD)){
+    TELEMETRY_SERIAL.println(F("SD err"));
+    digitalWrite(LED,LOW); delay(500); digitalWrite(LED,HIGH);
+  }
   else {                                            // generates file name
     for (uint16_t nameCount = 0; nameCount < 1000; nameCount++) {
       filename[4] = nameCount/100 + '0';
@@ -97,14 +122,27 @@ void setup() {
 
 void loop() {
   long time0 = millis();
+  
+  if(millis()-bnotimer > bno_dt){
   imu::Vector<3> gyroscope     = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
   imu::Vector<3> euler         = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
   imu::Vector<3> accelerometer = bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
   imu::Vector<3> magnetometer  = bno.getVector(Adafruit_BNO055::VECTOR_MAGNETOMETER);
+  //imu::Quaternion quat = bno.getQuat(); //double qw= quat.w(); or double q[4]=[quat.w(),quat.x()...
   double temp = bno.getTemp();
+  bnotimer= millis();
+  }
+  
+  if(millis()-bmptimer > bmp_dt){
     double bmp_temp= bmp.temperature; //in Celcius, do I need int8_t type????
     double bmp_pressure= bmp.pressure / 100.0; //hPa or mbar 
-  double bmp_alt= bmp.readAltitude(SEALEVELPRESSURE_HPA); //m
+  double bmp_alt= bmp.readAltitude(SEALEVELPRESSURE_HPA); //m  
+  bmptimer= millis();
+  }
+
+  if(millis()-gpstimer > gps_dt){
+  //while (Serial2.available())
+  //    gps.encode(Serial2.read());
   int16_t sats= gps.satellites.value();
     float fix_hdop= gps.hdop.hdop(); //horiz. diminution of precision
   double gps_lat= gps.location.lat();
@@ -118,10 +156,12 @@ void loop() {
     double xy_dir_to_land= TinyGPSPlus::courseTo(gps_lat, gps_lon, launch_lat, launch_lon);
     double x_to_land= TinyGPSPlus::distanceBetween(0, gps_lon, 0, land_lon);
     double y_to_land= TinyGPSPlus::distanceBetween(gps_lat, 0, land_lat, 0);
-  //the indented values will be logged but not sent
-  smartDelay(200);
+  gpstimer=millis();
+  }   
+  //the indented values above will be logged but not sent
   
   // Downlink
+  if(millis()-radiotimer > radio_dt){
   BEGIN_SEND
   SEND_VECTOR_ITEM(euler_angle  , euler);
   SEND_VECTOR_ITEM(gyro         , gyroscope);
@@ -146,8 +186,12 @@ void loop() {
   SEND_ITEM(dir_from_launch     , dir_from_launch);
   SEND_ITEM(sats                , sats);
   END_SEND
+  radiotimer=millis();  
+  }
+  
   
   // Writing to SD Card
+  if(millis()-sdtimer > sd_dt){
   DateTime now = rtc.now();
   //writing abs time,sys date,sys time 
   dataFile.print(millis());           dataFile.print(',');
@@ -183,8 +227,12 @@ void loop() {
   WRITE_CSV_ITEM(fix_hdop)
   dataFile.println();
   dataFile.flush();
+  sdtimer=millis();  
+  }
+   
 }
 
+/*
 static void smartDelay(unsigned long ms)
 {
   unsigned long start = millis();
@@ -194,3 +242,4 @@ static void smartDelay(unsigned long ms)
       gps.encode(Serial2.read());
   } while (millis() - start < ms);
 }
+*/
