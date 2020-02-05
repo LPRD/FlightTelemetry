@@ -84,12 +84,12 @@ imu::Vector<3> magnetometer;
 //imu::Quaternion quat; //double qw; ordouble q[4];
 double temp;
 
-double bno_x= 0;
-double bno_y= 0;
-double bno_z= 0;
-double bno_vx= 0;
-double bno_vy= 0;
-double bno_vz= 0;
+  double bno_x= 0;
+  double bno_y= 0;
+  double bno_z= 0;
+  double bno_vx= 0;
+  double bno_vy= 0;
+  double bno_vz= 0;
 double bno_alt= Launch_ALT; //will be -bno_x
 double bno_alt_last [10]= {0,0,0,0,0,0,0,0,0,0};
 double bno_alt_new [10]= {0,0,0,0,0,0,0,0,0,0};
@@ -100,10 +100,8 @@ bool bno_descending= 0;
 
 double bmp_temp;
 double bmp_pressure;
-double bmp_alt= 0;
-
-double bmp_x= 0;
-double bmp_vx= 0;
+double bmp_alt= 0;  
+//can review alt data to get bmp vel, accel
 double bmp_alt_last [10]= {0,0,0,0,0,0,0,0,0,0};
 double bmp_alt_new [10]= {0,0,0,0,0,0,0,0,0,0};
 double bmp_alt_last_avg= 0;
@@ -129,9 +127,7 @@ double y_to_land;
 double gps_n= 0; //m north of launch spot
 double gps_e= 0; //m east of launch spot
 double gps_d= 0; //m down of launch spot (will be -)
-double gps_vn= 0;  //velocity in m/s in the North dir
-double gps_ve= 0;  //velocity in m/s in the East dir
-double gps_vd= 0;  //velocity in m/s in the down dir (will be - initially)
+//can review data to get gps vel, accel, use gps_alt for data analysis
 double gps_alt_last [10]= {0,0,0,0,0,0,0,0,0,0};
 double gps_alt_new [10]= {0,0,0,0,0,0,0,0,0,0};
 double gps_alt_last_avg= 0;
