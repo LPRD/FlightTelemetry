@@ -63,7 +63,9 @@ char filename[] = "DATA000.csv";
 
 unsigned int missed_deadlines = 0;
 
-//carry working gps to points and record positions
+#define Launch_ALT 300  //Launch Alt above sea level- UPDATE B4 FLIGHT!!!
+
+//carry working gps to points and record positions- UPDATE B4 FLIGHT!!!
 #define launch_lat 44.975313  
 #define launch_lon -93.232216
 #define land_lat (44.975313+.00035)
@@ -75,9 +77,71 @@ long bmptimer= 0;
 long bnotimer= 0;
 long sdtimer= 0;
 
-void setup() {
-  
-     
+imu::Vector<3> gyroscope;
+imu::Vector<3> euler;
+imu::Vector<3> accelerometer;
+imu::Vector<3> magnetometer;
+//imu::Quaternion quat; //double qw; ordouble q[4];
+double temp;
+
+double bno_x= 0;
+double bno_y= 0;
+double bno_z= 0;
+double bno_vx= 0;
+double bno_vy= 0;
+double bno_vz= 0;
+double bno_alt= Launch_ALT; //will be -bno_x
+double bno_alt_last [10]= {0,0,0,0,0,0,0,0,0,0};
+double bno_alt_new [10]= {0,0,0,0,0,0,0,0,0,0};
+double bno_alt_last_avg= 0;
+double bno_alt_new_avg= 0;
+int bno_descending_counter= 0;
+bool bno_descending= 0;  
+
+double bmp_temp;
+double bmp_pressure;
+double bmp_alt= 0;
+
+double bmp_x= 0;
+double bmp_vx= 0;
+double bmp_alt_last [10]= {0,0,0,0,0,0,0,0,0,0};
+double bmp_alt_new [10]= {0,0,0,0,0,0,0,0,0,0};
+double bmp_alt_last_avg= 0;
+double bmp_alt_new_avg= 0;
+int bmp_descending_counter= 0;
+bool bmp_descending= 0;  
+
+//Cardinal= in the North/East/South/West plane, NO up/down component!
+int16_t sats;
+float fix_hdop; //horiz. diminution of precision
+double gps_lat;
+double gps_lon;
+double gps_alt; //alt above SL in m
+double gps_vel; //abs Cardinal speed in m/s
+double gps_dir; //abs Cardinal course in deg, N=0, E=90...
+double xy_from_lanch; //Cardinal distance in m from launch pt
+double dir_from_launch; //Cardinal dir from launch pt in deg, N=0, E=90...
+double xy_to_land; //Cardinal distance in m to land pt
+double xy_dir_to_land; //Cardinal direction in deg to land pt
+double x_to_land;
+double y_to_land;
+//NorthEastDown Frame
+double gps_n= 0; //m north of launch spot
+double gps_e= 0; //m east of launch spot
+double gps_d= 0; //m down of launch spot (will be -)
+double gps_vn= 0;  //velocity in m/s in the North dir
+double gps_ve= 0;  //velocity in m/s in the East dir
+double gps_vd= 0;  //velocity in m/s in the down dir (will be - initially)
+double gps_alt_last [10]= {0,0,0,0,0,0,0,0,0,0};
+double gps_alt_new [10]= {0,0,0,0,0,0,0,0,0,0};
+double gps_alt_last_avg= 0;
+double gps_alt_new_avg= 0;
+int gps_descending_counter= 0;
+bool gps_descending= 0;  
+
+double sum=0;
+
+void setup() {  
   Serial2.begin(GPSBaud); //Serial2 is the radio
   TELEMETRY_SERIAL.begin(57600); TELEMETRY_SERIAL.println();
   
@@ -120,45 +184,137 @@ void setup() {
 }
 
 
+
+
 void loop() {
   long time0 = millis();
   
   if(millis()-bnotimer > bno_dt){
-  imu::Vector<3> gyroscope     = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
-  imu::Vector<3> euler         = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
-  imu::Vector<3> accelerometer = bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
-  imu::Vector<3> magnetometer  = bno.getVector(Adafruit_BNO055::VECTOR_MAGNETOMETER);
-  //imu::Quaternion quat = bno.getQuat(); //double qw= quat.w(); or double q[4]=[quat.w(),quat.x()...
-  double temp = bno.getTemp();
-  bnotimer= millis();
-  }
+    gyroscope     = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
+    euler         = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
+    accelerometer = bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
+    magnetometer  = bno.getVector(Adafruit_BNO055::VECTOR_MAGNETOMETER);
+    //quat = bno.getQuat(); //qw= quat.w(); or q[4]=[quat.w(),quat.x()...
+    temp = bno.getTemp();
+
+    for (int i=0;i<9;i++){
+      bno_alt_new[i+1]=bno_alt_new[i]; //move every element 1 back 
+    }
+    bno_alt_new[0]= bno_alt; //now array fully updated
+    
+    for (int i=0;i<10;i++){
+      sum=sum+bno_alt_new[i];
+    }
+    bno_alt_new_avg= sum/10.0;
+    sum=0;  //reset sum var for next use
+
+    if(bno_alt_last_avg > bno_alt_new_avg){
+      bno_descending_counter= bno_descending_counter + 1;
+    }
+    
+    for (int i=0;i<10;i++){
+      bno_alt_last[i]= bno_alt_new[i];
+    } //prev alts now = current alts
+    bno_alt_last_avg= bno_alt_new_avg;
   
-  if(millis()-bmptimer > bmp_dt){
-    double bmp_temp= bmp.temperature; //in Celcius, do I need int8_t type????
-    double bmp_pressure= bmp.pressure / 100.0; //hPa or mbar 
-  double bmp_alt= bmp.readAltitude(SEALEVELPRESSURE_HPA); //m  
-  bmptimer= millis();
+  
+    
+    bnotimer= millis();
   }
 
+  if(bno_descending != 1){
+    if((bno_descending_counter>9)&& (bno_alt > Launch_ALT + 100)){ 
+      bno_descending = 1;
+    }
+  }
+
+  
+  if(millis()-bmptimer > bmp_dt){
+    bmp_temp= bmp.temperature; //in Celcius, do I need int8_t type????
+    bmp_pressure= bmp.pressure / 100.0; //hPa or mbar 
+    bmp_alt= bmp.readAltitude(SEALEVELPRESSURE_HPA); //m
+    
+    for (int i=0;i<9;i++){
+      bmp_alt_new[i+1]=bmp_alt_new[i]; //move every element 1 back 
+    }
+    bmp_alt_new[0]= bmp_alt; //now array fully updated
+    
+    for (int i=0;i<10;i++){
+      sum=sum+bmp_alt_new[i];
+    }
+    bmp_alt_new_avg= sum/10.0;
+    sum=0;  //reset sum var for next use
+
+    if(bmp_alt_last_avg > bmp_alt_new_avg){
+      bmp_descending_counter= bmp_descending_counter + 1;
+    }
+    
+    for (int i=0;i<10;i++){
+      bmp_alt_last[i]= bmp_alt_new[i];
+    } //prev alts now = current alts
+    bmp_alt_last_avg= bmp_alt_new_avg;
+  
+    
+    bmptimer= millis();
+  }
+
+  if(bmp_descending != 1){
+    if((bmp_descending_counter>9)&& (bmp_alt > Launch_ALT + 100)){ 
+      bmp_descending = 1;
+    }
+  }
+  
+  
   if(millis()-gpstimer > gps_dt){
-  //while (Serial2.available())
-  //    gps.encode(Serial2.read());
-  int16_t sats= gps.satellites.value();
-    float fix_hdop= gps.hdop.hdop(); //horiz. diminution of precision
-  double gps_lat= gps.location.lat();
-  double gps_lon= gps.location.lng();
-  double gps_alt= gps.altitude.meters(); //alt above SL in m
-  double gps_vel= gps.speed.mps(); //abs xy speed in m/s
-  double gps_dir= gps.course.deg(); //abs xy course in deg, N=0, E=90...
-  double xy_from_lanch= TinyGPSPlus::distanceBetween(launch_lat, launch_lon, gps_lat, gps_lon);
-  double dir_from_launch= TinyGPSPlus::courseTo(launch_lat, launch_lon, gps_lat, gps_lon);  //points from launch xy to rocket xy
-    double xy_to_land= TinyGPSPlus::distanceBetween(gps_lat, gps_lon, land_lat, land_lon);
-    double xy_dir_to_land= TinyGPSPlus::courseTo(gps_lat, gps_lon, launch_lat, launch_lon);
-    double x_to_land= TinyGPSPlus::distanceBetween(0, gps_lon, 0, land_lon);
-    double y_to_land= TinyGPSPlus::distanceBetween(gps_lat, 0, land_lat, 0);
-  gpstimer=millis();
+    //while (Serial2.available())
+    //    gps.encode(Serial2.read());
+    sats= gps.satellites.value();
+    fix_hdop= gps.hdop.hdop(); 
+    gps_lat= gps.location.lat();
+    gps_lon= gps.location.lng();
+    gps_alt= gps.altitude.meters();
+    gps_vel= gps.speed.mps(); 
+    gps_dir= gps.course.deg(); 
+    xy_from_lanch= TinyGPSPlus::distanceBetween(launch_lat, launch_lon, gps_lat, gps_lon);
+    dir_from_launch= TinyGPSPlus::courseTo(launch_lat, launch_lon, gps_lat, gps_lon);  
+    xy_to_land= TinyGPSPlus::distanceBetween(gps_lat, gps_lon, land_lat, land_lon);
+    xy_dir_to_land= TinyGPSPlus::courseTo(gps_lat, gps_lon, launch_lat, launch_lon);
+    x_to_land= TinyGPSPlus::distanceBetween(0, gps_lon, 0, land_lon);
+    y_to_land= TinyGPSPlus::distanceBetween(gps_lat, 0, land_lat, 0);
+    gps_n= TinyGPSPlus::distanceBetween(launch_lat, 0, gps_lat, 0);
+    gps_e= TinyGPSPlus::distanceBetween(0, launch_lon, 0, gps_lon);
+    gps_d=-gps_alt;
+    
+    for (int i=0;i<9;i++){
+      gps_alt_new[i+1]=gps_alt_new[i]; //move every element 1 back 
+    }
+    gps_alt_new[0]= gps_alt; //now array fully updated
+    
+    for (int i=0;i<10;i++){
+      sum=sum+gps_alt_new[i];
+    }
+    gps_alt_new_avg= sum/10.0;
+    sum=0;  //reset sum var for next use
+
+    if(gps_alt_last_avg > gps_alt_new_avg){
+      gps_descending_counter= gps_descending_counter + 1;
+    }
+    
+    for (int i=0;i<10;i++){
+      gps_alt_last[i]= gps_alt_new[i];
+    } //prev alts now = current alts
+    gps_alt_last_avg= gps_alt_new_avg;
+
+    
+    gpstimer=millis();
   }   
-  //the indented values above will be logged but not sent
+
+  if(gps_descending != 1){
+    if((gps_descending_counter>9)&& (bmp_alt > Launch_ALT + 100)){ 
+      gps_descending = 1;
+    }
+  }
+  
   
   // Downlink
   if(millis()-radiotimer > radio_dt){
@@ -231,15 +387,3 @@ void loop() {
   }
    
 }
-
-/*
-static void smartDelay(unsigned long ms)
-{
-  unsigned long start = millis();
-  do 
-  {
-    while (Serial2.available())
-      gps.encode(Serial2.read());
-  } while (millis() - start < ms);
-}
-*/
