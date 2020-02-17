@@ -8,6 +8,7 @@
 #include <Adafruit_BMP3XX.h>  //bmp.setOutputDataRate(BMP3_ODR_50_HZ);  ...ODR_200_HZ, _12_5_HZ, _3_1_HZ, _1_5_HZ, etc
 #include <TinyGPS++.h>  //10hz update rate, ~5 w/ RTK
 #include <Telemetry.h>
+#include <PWMServo.h>
 
 //GPS setup
 static const uint32_t GPSBaud = 9600;
@@ -26,6 +27,8 @@ TinyGPSPlus gps;
 #define BMP_MISO 12
 #define BMP_MOSI 11
 #define BMP_CS 15
+
+//UPDATE B4 FLIGHT!!!
 //Calibration Factor for BMP388, chech loacl pressure b4 flight!
 #define SEALEVELPRESSURE_HPA (1013.25)
 Adafruit_BMP3XX bmp(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK);  //software SPI
@@ -39,14 +42,52 @@ Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);//ID, Address, Wire
 //internal clock setup
 RTC_DS1307 rtc;
 
+//Remaining issues: RTC doesn't work right, still not sure why
+//I also haven't been able to get I2C ports on the teensy working 
+//other than SDA0 and SCL0... there is some sytax involving "&Wire" 
+//above in the BNO setup that I think is supposed to be changed but 
+//I have already tried using Wire1 and &Wire1 but the BNO 
+//didnt give data when I connected it to the SCL1/SDA1 ports on the
+//teensy... long story short I could use some help here
+
+
 //SD logging setup
 File dataFile;
 char filename[] = "DATA000.csv";
 #define sd_dt 10 //time in ms between data points in csv file logging
 
+//Battery Reading Setup
+#define Batt_V_Read A0
+double reading;
+double vbatt1;
+int batt1_num_cells 4;  //UPDATE B4 FLIGHT!!!
 
-#define LED 13 //Error LED
+//Pin setup
+#define LED 13 //Error LED, refers to builtin LED on teensy
+#define PYRO1 24
+#define PYRO2 25
+#define PYRO3 26
+#define PYRO4 27
+#define PYRO5 28  //Camera on/off Pin
+#define PWM1 2
+#define PWM2 3
+#define PWM3 4
+#define PWM4 5
+#define PWM5 6
+#define PWM6 7
+#define PWM7 8
+#define PWM8 23 //A9
+#define PWM9 22 //A8
+#define PWM10 21 //A7
+#define PWM11 20 //A6
+#define PWM12 17 //A3
+#define PWM13 16 //A2
+#define PWM14 36 //A17
+#define PWM15 35 //A16
 
+PWMServo S1;
+
+int pos1 = 90;
 
 #define SEND_VECTOR_ITEM(field, value)\
   SEND_ITEM(field, value.x())         \
@@ -63,8 +104,11 @@ char filename[] = "DATA000.csv";
 
 unsigned int missed_deadlines = 0;
 
-#define Launch_ALT 300  //Launch Alt above sea level- UPDATE B4 FLIGHT!!!
-
+//BMP calibration factor is ABOVE in the code ^
+#define Launch_ALT 300  //Launch Alt above sea level in m- UPDATE B4 FLIGHT!!!
+#define ATST 100 //m above launch height- UPDATE B4 FLIGHT!!!
+//Apogee Trigger Safety Threshold- apogee detection/(parachute) triggering will not work below this pt
+                        
 //carry working gps to points and record positions- UPDATE B4 FLIGHT!!!
 #define launch_lat 44.975313  
 #define launch_lon -93.232216
@@ -76,6 +120,8 @@ long radiotimer= 0;
 long bmptimer= 0;
 long bnotimer= 0;
 long sdtimer= 0;
+long falltimer=0;
+#define fall_dt 10
 
 imu::Vector<3> gyroscope;
 imu::Vector<3> euler;
@@ -135,6 +181,8 @@ double gps_alt_new_avg= 0;
 int gps_descending_counter= 0;
 bool gps_descending= 0;  
 
+bool Apogee_Passed=0;
+
 double sum=0;
 
 void setup() {  
@@ -176,6 +224,22 @@ void setup() {
       }
     }
   }
+  //Pin Initialization
+  pinMode(PYRO1, OUTPUT);
+  pinMode(PYRO2, OUTPUT);
+  pinMode(PYRO3, OUTPUT);
+  pinMode(PYRO4, OUTPUT);
+  pinMode(PYRO5, OUTPUT);
+  digitalWrite(PYRO1,LOW);
+  digitalWrite(PYRO2,LOW);
+  digitalWrite(PYRO3,LOW);
+  digitalWrite(PYRO4,LOW);
+  digitalWrite(PYRO5,LOW);
+  //this could probably be done w/ a loop in fewer lines
+  //so if someone wants to do that that'll work 
+
+  S1.attach(PWM1);
+  //S1.attach(SERVO_PIN_A, 1000, 2000); //some motors need min/max setting
   
 }
 
@@ -183,7 +247,7 @@ void setup() {
 
 
 void loop() {
-  long time0 = millis();
+  long time0 = millis();  //I don't think we need this
   
   if(millis()-bnotimer > bno_dt){
     gyroscope     = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
@@ -204,7 +268,7 @@ void loop() {
     bno_alt_new_avg= sum/10.0;
     sum=0;  //reset sum var for next use
 
-    if(bno_alt_last_avg > bno_alt_new_avg){
+    if((bno_alt_last_avg > bno_alt_new_avg) && (bno_alt > Launch_ALT + ATST)){
       bno_descending_counter= bno_descending_counter + 1;
     }
     
@@ -219,7 +283,7 @@ void loop() {
   }
 
   if(bno_descending != 1){
-    if((bno_descending_counter>9)&& (bno_alt > Launch_ALT + 100)){ 
+    if((bno_descending_counter>9)&& (bno_alt > Launch_ALT + ATST)){ 
       bno_descending = 1;
     }
   }
@@ -229,7 +293,6 @@ void loop() {
     bmp_temp= bmp.temperature; //in Celcius, do I need int8_t type????
     bmp_pressure= bmp.pressure / 100.0; //hPa or mbar 
     bmp_alt= bmp.readAltitude(SEALEVELPRESSURE_HPA); //m
-    
     for (int i=0;i<9;i++){
       bmp_alt_new[i+1]=bmp_alt_new[i]; //move every element 1 back 
     }
@@ -241,7 +304,7 @@ void loop() {
     bmp_alt_new_avg= sum/10.0;
     sum=0;  //reset sum var for next use
 
-    if(bmp_alt_last_avg > bmp_alt_new_avg){
+    if((bmp_alt_last_avg > bmp_alt_new_avg) && (bmp_alt > Launch_ALT + ATST)){
       bmp_descending_counter= bmp_descending_counter + 1;
     }
     
@@ -255,13 +318,16 @@ void loop() {
   }
 
   if(bmp_descending != 1){
-    if((bmp_descending_counter>9)&& (bmp_alt > Launch_ALT + 100)){ 
+    if((bmp_descending_counter>9)&& (bmp_alt > Launch_ALT + ATST)){ 
       bmp_descending = 1;
     }
   }
   
   
   if(millis()-gpstimer > gps_dt){
+    //battery voltage read code will also go here:
+    reading= analogRead(Batt_V_Read);
+    vbatt1= reading*(3.3/1023.00)*batt1_num_cells;
     //while (Serial2.available())
     //    gps.encode(Serial2.read());
     sats= gps.satellites.value();
@@ -292,7 +358,7 @@ void loop() {
     gps_alt_new_avg= sum/10.0;
     sum=0;  //reset sum var for next use
 
-    if(gps_alt_last_avg > gps_alt_new_avg){
+    if((gps_alt_last_avg > gps_alt_new_avg) && (bmp_alt > Launch_ALT + ATST)){
       gps_descending_counter= gps_descending_counter + 1;
     }
     
@@ -306,10 +372,54 @@ void loop() {
   }   
 
   if(gps_descending != 1){
-    if((gps_descending_counter>9)&& (bmp_alt > Launch_ALT + 100)){ 
+    if((gps_descending_counter>9)&& (bmp_alt > Launch_ALT + ATST)){ 
       gps_descending = 1;
     }
   }
+
+
+  if(millis()-falltimer > fall_dt){
+    //Code that is active before Apogee is Reached/Passed
+    if(Apogee_Passed !=1){
+      
+      //S1.write(pos1);
+      
+      //The following loop only trigger ONCE (when apogee is detected)
+      if((gps_descending*1)+(bmp_descending*1)+(bno_descending*1) > 1){
+        Apogee_Passed=1;
+        //fire drouge chute
+        digitalWrite(PYRO1,HIGH);        
+        //for(pos = 180; pos >=1; pos -= 1){ //close a servo all the way
+        //  S1.write(pos); 
+        //  delay(30); 
+        //}
+      }
+    }
+    //Continuous code that runs once Apogee is Reached/Passed
+    if(Apogee_Passed = 1){
+      //insert code here, ex: wait to fire main chutes
+  
+      if(bmp_alt < Launch_ALT + ATST + 50){
+        digitalWrite(PYRO2,HIGH); //fire main chute, just an example
+
+        //would need another trigger lock to ensure this loop doesn't 
+        //keep repeating on every iteration...
+        //for(pos = 0; pos < 180; pos+=1) { //open a servo all the way
+        //  S1.write(pos);
+        //  delay(30);
+        //}
+        
+        //S1.write(pos1);
+      }
+      
+    }
+
+    falltimer=millis();
+  } 
+
+
+
+
   
   
   // Downlink
