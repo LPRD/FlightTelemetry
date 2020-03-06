@@ -60,7 +60,7 @@ char filename[] = "DATA000.csv";
 #define Batt_V_Read A0
 double reading;
 double vbatt1;
-int batt1_num_cells 4;  //UPDATE B4 FLIGHT!!!
+int voltage_divider_ratio= 6;   //batt1_num_cells= 4;  //UPDATE B4 FLIGHT!!!
 
 //Pin setup
 #define LED 13 //Error LED, refers to builtin LED on teensy
@@ -219,7 +219,8 @@ void setup() {
         dataFile = SD.open(filename, FILE_WRITE);
         TELEMETRY_SERIAL.print(F("\twriting "));
         TELEMETRY_SERIAL.println(filename);
-        dataFile.println(F("abs time,sys date,sys time,x angle,y angle,z angle,x gyro,y gyro,z gyro,bno temp,x mag,y mag,z mag,x accel,y accel,z accel,bmp alt,gps alt,gps lat,gps lon,gps vel,gps dir,xy_from_lanch,dir_from_launch,xy_to_land,xy_dir_to_land,x_to_land,y_to_land,bmp temp,bmp pressure,sats,hdop"));
+        dataFile.println(F("abs time,sys date,sys time,x angle,y angle,z angle,x gyro,y gyro,z gyro,bno temp,x mag,y mag,z mag,x accel,y accel,z accel"));
+        dataFile.println(F(",bmp alt,gps alt,gps lat,gps lon,gps vel,gps dir,xy_from_lanch,dir_from_launch,xy_to_land,xy_dir_to_land,x_to_land,y_to_land,bmp temp,bmp pressure,sats,hdop,vbatt1"));
         break;
       }
     }
@@ -327,7 +328,7 @@ void loop() {
   if(millis()-gpstimer > gps_dt){
     //battery voltage read code will also go here:
     reading= analogRead(Batt_V_Read);
-    vbatt1= reading*(3.3/1023.00)*batt1_num_cells;
+    vbatt1= reading*(3.3/1023.00)* voltage_divider_ratio;  //batt1_num_cells;
     //while (Serial2.available())
     //    gps.encode(Serial2.read());
     sats= gps.satellites.value();
@@ -447,6 +448,7 @@ void loop() {
   SEND_ITEM(xy_from_lanch       , xy_from_lanch);
   SEND_ITEM(dir_from_launch     , dir_from_launch);
   SEND_ITEM(sats                , sats);
+  SEND_ITEM(vb1                , vbatt1);
   END_SEND
   radiotimer=millis();  
   }
@@ -487,6 +489,7 @@ void loop() {
   WRITE_CSV_ITEM(bmp_pressure)
   WRITE_CSV_ITEM(sats)
   WRITE_CSV_ITEM(fix_hdop)
+  WRITE_CSV_ITEM(vbatt1)
   dataFile.println();
   dataFile.flush();
   sdtimer=millis();  
