@@ -1,7 +1,6 @@
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
-#include <RTClib.h>
 #include <Adafruit_Sensor.h>
 #include <Adafruit_BNO055.h> //all 100hz except mag(20) and temp(1)
 #include <avr/pgmspace.h>
@@ -9,11 +8,12 @@
 #include <TinyGPS++.h>  //10hz update rate, ~5 w/ RTK
 #include <Telemetry.h>
 #include <PWMServo.h>
+#include <TimeLib.h>
 
 //GPS setup
 static const uint32_t GPSBaud = 9600;
 TinyGPSPlus gps;
-#define gps_dt 100 //time in ms between samples for neo m8n GPS
+#define gps_dt 1000 //time in ms between samples for neo m8n GPS
 
 //radio setup
 #define TELEMETRY_SERIAL Serial1 //Teensy 3.6 has to use Serial1 or higher
@@ -39,9 +39,6 @@ Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);//ID, Address, Wire
 //use the syntax &Wire1, 2,... for SDA1, 2,... //55 as the only argument also works
 #define bno_dt 10 //time in ms between samples for bno055
 
-//internal clock setup
-RTC_DS1307 rtc;
-
 //Remaining issues: RTC doesn't work right, still not sure why
 //I also haven't been able to get I2C ports on the teensy working 
 //other than SDA0 and SCL0... there is some sytax involving "&Wire" 
@@ -57,7 +54,7 @@ char filename[] = "DATA000.csv";
 #define sd_dt 10 //time in ms between data points in csv file logging
 
 //Battery Reading Setup
-#define Batt_V_Read A0
+#define Batt_V_Read 14  %A0
 double reading;
 double vbatt1;
 int voltage_divider_ratio= 6;   //batt1_num_cells= 4;  //UPDATE B4 FLIGHT!!!
@@ -185,11 +182,16 @@ bool Apogee_Passed=0;
 
 double sum=0;
 
-void setup() {  
+void setup() {
+  setSyncProvider(getTeensy3Time);
   Serial2.begin(GPSBaud); //Serial2 is the radio
   TELEMETRY_SERIAL.begin(57600); TELEMETRY_SERIAL.println();
   
-  rtc.begin();  //ensures that rtc actually begins...
+  // Teensy RTC error/success config
+  while (timeStatus()!= timeSet) {
+    TELEMETRY_SERIAL.println(F("Teensy RTC err"));
+    digitalWrite(LED,LOW); delay(1000); digitalWrite(LED,HIGH);
+  }
   
   while (!bmp.begin()) {                         //flashes to signal error
     TELEMETRY_SERIAL.println(F("BMP388 err"));
@@ -202,10 +204,9 @@ void setup() {
   
   while (!bno.begin()) {                         //flashes to signal error
     TELEMETRY_SERIAL.println(F("BNO055 err"));
-    digitalWrite(LED,LOW); delay(1000); digitalWrite(LED,HIGH);
+    digitalWrite(LED,LOW); delay(100); digitalWrite(LED,HIGH);
   }
   
-  if (!rtc.isrunning()) { rtc.adjust(DateTime(__DATE__, __TIME__)); }
   if (!SD.begin(BUILTIN_SDCARD)){
     TELEMETRY_SERIAL.println(F("SD err"));
     digitalWrite(LED,LOW); delay(500); digitalWrite(LED,HIGH);
@@ -219,7 +220,7 @@ void setup() {
         dataFile = SD.open(filename, FILE_WRITE);
         TELEMETRY_SERIAL.print(F("\twriting "));
         TELEMETRY_SERIAL.println(filename);
-        dataFile.println(F("abs time,sys date,sys time,x angle,y angle,z angle,x gyro,y gyro,z gyro,bno temp,x mag,y mag,z mag,x accel,y accel,z accel"));
+        dataFile.print(F("abs time,sys date,sys time,x angle,y angle,z angle,x gyro,y gyro,z gyro,bno temp,x mag,y mag,z mag,x accel,y accel,z accel"));
         dataFile.println(F(",bmp alt,gps alt,gps lat,gps lon,gps vel,gps dir,xy_from_lanch,dir_from_launch,xy_to_land,xy_dir_to_land,x_to_land,y_to_land,bmp temp,bmp pressure,sats,hdop,vbatt1"));
         break;
       }
@@ -329,8 +330,10 @@ void loop() {
     //battery voltage read code will also go here:
     reading= analogRead(Batt_V_Read);
     vbatt1= reading*(3.3/1023.00)* voltage_divider_ratio;  //batt1_num_cells;
-    //while (Serial2.available())
-    //    gps.encode(Serial2.read());
+    //while (Serial2.available()){
+    //  gps.encode(Serial2.read());
+    //}
+    
     sats= gps.satellites.value();
     fix_hdop= gps.hdop.hdop(); 
     gps_lat= gps.location.lat();
@@ -347,6 +350,8 @@ void loop() {
     gps_n= TinyGPSPlus::distanceBetween(launch_lat, 0, gps_lat, 0);
     gps_e= TinyGPSPlus::distanceBetween(0, launch_lon, 0, gps_lon);
     gps_d=-gps_alt;
+    
+    smartDelay(1000);
     
     for (int i=0;i<9;i++){
       gps_alt_new[i+1]=gps_alt_new[i]; //move every element 1 back 
@@ -425,74 +430,91 @@ void loop() {
   
   // Downlink
   if(millis()-radiotimer > radio_dt){
-  BEGIN_SEND
-  SEND_VECTOR_ITEM(euler_angle  , euler);
-  SEND_VECTOR_ITEM(gyro         , gyroscope);
-  SEND_ITEM(temperature         , temp);
-  SEND_VECTOR_ITEM(magnetometer , magnetometer);
-  SEND_VECTOR_ITEM(acceleration , accelerometer);
-  SEND_ITEM(bmp_alt             , bmp_alt);
-  SEND_ITEM(gps_alt             , gps_alt);
-  //SEND_ITEM(gps_lat             , gps_lat);
-  TELEMETRY_SERIAL.print(F(";"));               
-  TELEMETRY_SERIAL.print(F("gps_lat"));            
-  TELEMETRY_SERIAL.print(F(":"));               
-  TELEMETRY_SERIAL.print(gps_lat,5);//more digits of precision
-  //SEND_ITEM(gps_lon             , gps_lon);
-  TELEMETRY_SERIAL.print(F(";"));               
-  TELEMETRY_SERIAL.print(F("gps_lon"));            
-  TELEMETRY_SERIAL.print(F(":"));               
-  TELEMETRY_SERIAL.print(gps_lon,5);//more digits of precision
-  SEND_ITEM(gps_vel             , gps_vel);
-  SEND_ITEM(gps_dir             , gps_dir);
-  SEND_ITEM(xy_from_lanch       , xy_from_lanch);
-  SEND_ITEM(dir_from_launch     , dir_from_launch);
-  SEND_ITEM(sats                , sats);
-  SEND_ITEM(vb1                , vbatt1);
-  END_SEND
-  radiotimer=millis();  
+    BEGIN_SEND
+    SEND_VECTOR_ITEM(euler_angle  , euler);
+    SEND_VECTOR_ITEM(gyro         , gyroscope);
+    SEND_ITEM(temperature         , temp);
+    SEND_VECTOR_ITEM(magnetometer , magnetometer);
+    SEND_VECTOR_ITEM(acceleration , accelerometer);
+    SEND_ITEM(bmp_alt             , bmp_alt);
+    SEND_ITEM(gps_alt             , gps_alt);
+    //SEND_ITEM(gps_lat             , gps_lat);
+    TELEMETRY_SERIAL.print(F(";"));               
+    TELEMETRY_SERIAL.print(F("gps_lat"));            
+    TELEMETRY_SERIAL.print(F(":"));               
+    TELEMETRY_SERIAL.print(gps_lat,5);//more digits of precision
+    //SEND_ITEM(gps_lon             , gps_lon);
+    TELEMETRY_SERIAL.print(F(";"));               
+    TELEMETRY_SERIAL.print(F("gps_lon"));            
+    TELEMETRY_SERIAL.print(F(":"));               
+    TELEMETRY_SERIAL.print(gps_lon,5);//more digits of precision
+    SEND_ITEM(gps_vel             , gps_vel);
+    SEND_ITEM(gps_dir             , gps_dir);
+    SEND_ITEM(xy_from_lanch       , xy_from_lanch);
+    SEND_ITEM(dir_from_launch     , dir_from_launch);
+    SEND_ITEM(sats                , sats);
+    SEND_ITEM(vb1                , vbatt1);
+    END_SEND
+    radiotimer=millis();  
   }
   
   
   // Writing to SD Card
   if(millis()-sdtimer > sd_dt){
-  DateTime now = rtc.now();
-  //writing abs time,sys date,sys time 
-  dataFile.print(millis());           dataFile.print(',');
-  dataFile.print(now.year()  ,DEC);   dataFile.print('/');
-  dataFile.print(now.month() ,DEC);   dataFile.print('/');
-  dataFile.print(now.day()   ,DEC);   dataFile.print(',');
-  dataFile.print(now.hour()  ,DEC);   dataFile.print(':');
-  dataFile.print(now.minute(),DEC);   dataFile.print(':');
-  dataFile.print(now.second(),DEC);
-  //writing sensor values
-  WRITE_CSV_VECTOR_ITEM(euler)
-  WRITE_CSV_VECTOR_ITEM(gyroscope)
-  WRITE_CSV_ITEM(temp)
-  WRITE_CSV_VECTOR_ITEM(magnetometer)
-  WRITE_CSV_VECTOR_ITEM(accelerometer)
-  WRITE_CSV_ITEM(bmp_alt)
-  WRITE_CSV_ITEM(gps_alt)
-  //WRITE_CSV_ITEM(gps_lat) //change to have more precision
-  dataFile.print(F(", ")); dataFile.print(gps_lat,8);
-  //WRITE_CSV_ITEM(gps_lon) //change to have more precision
-  dataFile.print(F(", ")); dataFile.print(gps_lat,8);
-  WRITE_CSV_ITEM(gps_vel)
-  WRITE_CSV_ITEM(gps_dir)
-  WRITE_CSV_ITEM(xy_from_lanch)
-  WRITE_CSV_ITEM(dir_from_launch)
-  WRITE_CSV_ITEM(xy_to_land)
-  WRITE_CSV_ITEM(xy_dir_to_land)
-  WRITE_CSV_ITEM(x_to_land)
-  WRITE_CSV_ITEM(y_to_land)
-  WRITE_CSV_ITEM(bmp_temp)
-  WRITE_CSV_ITEM(bmp_pressure)
-  WRITE_CSV_ITEM(sats)
-  WRITE_CSV_ITEM(fix_hdop)
-  WRITE_CSV_ITEM(vbatt1)
-  dataFile.println();
-  dataFile.flush();
-  sdtimer=millis();  
+    //writing abs time,sys date,sys time 
+    dataFile.print(millis());           dataFile.print(',');
+    //might need to do: dataFile.print(year()  ,DEC);   DEC format
+    dataFile.print(year());   dataFile.print('/');
+    dataFile.print(month());   dataFile.print('/');
+    dataFile.print(day());   dataFile.print(',');
+    dataFile.print(hour());   dataFile.print(':');
+    dataFile.print(minute());   dataFile.print(':');
+    dataFile.print(second());
+    //writing sensor values
+    WRITE_CSV_VECTOR_ITEM(euler)
+    WRITE_CSV_VECTOR_ITEM(gyroscope)
+    WRITE_CSV_ITEM(temp)
+    WRITE_CSV_VECTOR_ITEM(magnetometer)
+    WRITE_CSV_VECTOR_ITEM(accelerometer)
+    WRITE_CSV_ITEM(bmp_alt)
+    WRITE_CSV_ITEM(gps_alt)
+    //WRITE_CSV_ITEM(gps_lat) //change to have more precision
+    dataFile.print(F(", ")); dataFile.print(gps_lat,8);
+    //WRITE_CSV_ITEM(gps_lon) //change to have more precision
+    dataFile.print(F(", ")); dataFile.print(gps_lat,8);
+    WRITE_CSV_ITEM(gps_vel)
+    WRITE_CSV_ITEM(gps_dir)
+    WRITE_CSV_ITEM(xy_from_lanch)
+    WRITE_CSV_ITEM(dir_from_launch)
+    WRITE_CSV_ITEM(xy_to_land)
+    WRITE_CSV_ITEM(xy_dir_to_land)
+    WRITE_CSV_ITEM(x_to_land)
+    WRITE_CSV_ITEM(y_to_land)
+    WRITE_CSV_ITEM(bmp_temp)
+    WRITE_CSV_ITEM(bmp_pressure)
+    WRITE_CSV_ITEM(sats)
+    WRITE_CSV_ITEM(fix_hdop)
+    WRITE_CSV_ITEM(vbatt1)
+    dataFile.println();
+    dataFile.flush();
+    sdtimer=millis();  
   }
    
+}
+
+
+time_t getTeensy3Time()
+{
+  return Teensy3Clock.get();
+}
+
+static void smartDelay(unsigned long ms)
+{
+  unsigned long start = millis();
+  do 
+  {
+    while (Serial2.available()){
+      gps.encode(Serial2.read());
+    }
+  } while (millis() - start < ms);
 }
