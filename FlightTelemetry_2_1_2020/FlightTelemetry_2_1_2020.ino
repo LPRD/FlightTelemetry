@@ -80,7 +80,7 @@ TinyGPSPlus gps;
 
 //UPDATE B4 FLIGHT!!!
 //Calibration Factor for BMP388, chech local pressure b4 flight!
-#define SEALEVELPRESSURE_HPA (1013.25)  //in hundredths of a Pa
+double SEALEVELPRESSURE_HPA= 1013.25;  //in units of 100* Pa
 Adafruit_BMP3XX bmp(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK);  //software SPI
 #define bmp_dt 100 //time in ms between samples for bmp388
 
@@ -151,15 +151,15 @@ int pos1 = 90;
 unsigned int missed_deadlines = 0;
 
 //BMP calibration factor is ABOVE in the code ^
-#define Launch_ALT 300  //Launch Alt above sea level in m- UPDATE B4 FLIGHT!!!
-#define ATST 100 //m above launch height- UPDATE B4 FLIGHT!!!
+double Launch_ALT= 300;  //Launch Alt above sea level in m- UPDATE B4 FLIGHT!!!
+double ATST= 100; //m above launch height- UPDATE B4 FLIGHT!!!
 //Apogee Trigger Safety Threshold- apogee detection/(parachute) triggering will not work below this pt
                         
 //carry working gps to points and record positions- UPDATE B4 FLIGHT!!!
-#define launch_lat 44.975313  
-#define launch_lon -93.232216
-#define land_lat (44.975313+.00035)
-#define land_lon (-93.232216+.00035)
+double launch_lat= 44.975313; 
+double launch_lon= -93.232216;
+double land_lat= (44.975313+.00035);
+double land_lon= (-93.232216+.00035);
 
 long gpstimer= 0;
 long radiotimer= 0;
@@ -561,6 +561,27 @@ void loop() {
     READ_FIELD(P5cmd, "%d", cmd) {
       P5_setting= cmd;
       digitalWrite(PYRO5,cmd);
+    }
+    READ_FIELD(Launch_ALT, "%d", val) {
+      Launch_ALT= val;
+    }
+    READ_FIELD(BMP_cf, "%d", val) {
+      SEALEVELPRESSURE_HPA= val;
+    }
+    READ_FIELD(ATST, "%d", val) {
+      ATST= val;
+    }
+    READ_FIELD(launch_lat, "%d", val) {
+      launch_lat= val;
+    }
+    READ_FIELD(launch_lon, "%d", val) {
+      launch_lon= val;
+    }
+    READ_FIELD(land_lat, "%d", val) {
+      land_lat= val;
+    }
+    READ_FIELD(land_lon, "%d", val) {
+      land_lon= val;
     }
     
     //not sure where the UI code sends this data- I
