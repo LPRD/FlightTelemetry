@@ -10,10 +10,58 @@
 #include <PWMServo.h>
 #include <TimeLib.h>
 
+#define DEMO 0
+#define FLIGHT 2
+
+// Change this line to set configuration
+#define CONFIGURATION FLIGHT    //UPDATE b4 FLIGHT!!!
+
+
+#define HEARTBEAT_TIMEOUT  5000
+long heartbeat_time = 0;
+bool link2ground = 1;
+bool cmd; //for pyro channels
+double val; //read value for ground config
+bool P1_setting,P2_setting,P3_setting,P4_setting,P5_setting= 0;
+
+
+#if CONFIGURATION == DEMO
+#define COUNTDOWN_DURATION 10000 // 10 sec
+#else
+#define COUNTDOWN_DURATION 60000 // 1 min
+#endif
+
+long abort_time= 0;
+long start_time = 0;
+bool ss = true; //ss stands for sensor_status
+
+char data[10] = "";
+char data_name[20] = "";
+
+typedef enum {
+  STAND_BY,
+  TERMINAL_COUNT,
+  IS_RISING,
+  IS_FALLING,
+  LANDED
+} state_t;
+
+state_t state = STAND_BY;
+
+// Convenience
+#define SET_STATE(STATE) {    \
+    state = STATE;            \
+    write_state(#STATE);      \
+  }
+
+
+
+void (*reset)(void) = 0;
+
 //GPS setup
 static const uint32_t GPSBaud = 9600;
 TinyGPSPlus gps;
-#define gps_dt 1000 //time in ms between samples for neo m8n GPS
+#define gps_dt 100 //time in ms between samples for neo m8n GPS
 
 //radio setup
 #define TELEMETRY_SERIAL Serial1 //Teensy 3.6 has to use Serial1 or higher
@@ -21,6 +69,8 @@ TinyGPSPlus gps;
 // 2-5 msgs/s is probably fine for the future, so we want ~600-1500 bytes/s, so no lower than 6000-15000 bits/s baud rate
 //I'm only showing the math here now b/c eventually we will want to lower the radio baud rates to get better range
 #define radio_dt 100 //time in ms between sending telemetry packets
+#define read_dt 1000 //time in ms between recieving telemetry packets
+
 
 //BMP388 setup
 #define BMP_SCK 13
@@ -29,18 +79,17 @@ TinyGPSPlus gps;
 #define BMP_CS 15
 
 //UPDATE B4 FLIGHT!!!
-//Calibration Factor for BMP388, chech loacl pressure b4 flight!
-#define SEALEVELPRESSURE_HPA (1013.25)
+//Calibration Factor for BMP388, chech local pressure b4 flight!
+#define SEALEVELPRESSURE_HPA (1013.25)  //in hundredths of a Pa
 Adafruit_BMP3XX bmp(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK);  //software SPI
-#define bmp_dt 10 //time in ms between samples for bmp388
+#define bmp_dt 100 //time in ms between samples for bmp388
 
 //BNO setup
 Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);//ID, Address, Wire
 //use the syntax &Wire1, 2,... for SDA1, 2,... //55 as the only argument also works
-#define bno_dt 10 //time in ms between samples for bno055
+#define bno_dt 50 //time in ms between samples for bno055
 
-//Remaining issues: RTC doesn't work right, still not sure why
-//I also haven't been able to get I2C ports on the teensy working 
+//Remaining issues: I haven't been able to get I2C ports on the teensy working 
 //other than SDA0 and SCL0... there is some sytax involving "&Wire" 
 //above in the BNO setup that I think is supposed to be changed but 
 //I have already tried using Wire1 and &Wire1 but the BNO 
@@ -51,13 +100,13 @@ Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);//ID, Address, Wire
 //SD logging setup
 File dataFile;
 char filename[] = "DATA000.csv";
-#define sd_dt 10 //time in ms between data points in csv file logging
+#define sd_dt 1000 //time in ms between data points in csv file logging
 
 //Battery Reading Setup
 #define Batt_V_Read 14  %A0
 double reading;
 double vbatt1;
-int voltage_divider_ratio= 6;   //batt1_num_cells= 4;  //UPDATE B4 FLIGHT!!!
+int voltage_divider_ratio= 6;
 
 //Pin setup
 #define LED 13 //Error LED, refers to builtin LED on teensy
@@ -114,18 +163,29 @@ unsigned int missed_deadlines = 0;
 
 long gpstimer= 0;
 long radiotimer= 0;
+long readtimer= 0;
 long bmptimer= 0;
 long bnotimer= 0;
 long sdtimer= 0;
 long falltimer=0;
 #define fall_dt 10
 
+
 imu::Vector<3> gyroscope;
 imu::Vector<3> euler;
 imu::Vector<3> accelerometer;
 imu::Vector<3> magnetometer;
-//imu::Quaternion quat; //double qw; ordouble q[4];
+imu::Quaternion q1; //double qw; // double q[4]; //both might also work, not sure
 double temp;
+double sqw;
+double sqx;
+double sqy;
+double sqz;
+double unit;
+double test;
+double heading;
+double attitude;
+double bank;
 
   double bno_x= 0;
   double bno_y= 0;
@@ -182,6 +242,7 @@ bool Apogee_Passed=0;
 
 double sum=0;
 
+
 void setup() {
   setSyncProvider(getTeensy3Time);
   Serial2.begin(GPSBaud); //Serial2 is the radio
@@ -190,26 +251,33 @@ void setup() {
   // Teensy RTC error/success config
   while (timeStatus()!= timeSet) {
     TELEMETRY_SERIAL.println(F("Teensy RTC err"));
-    digitalWrite(LED,LOW); delay(1000); digitalWrite(LED,HIGH);
+    digitalWrite(LED,LOW); delay(5000); digitalWrite(LED,HIGH);delay(5000);
   }
   
   while (!bmp.begin()) {                         //flashes to signal error
     TELEMETRY_SERIAL.println(F("BMP388 err"));
-    digitalWrite(LED,LOW); delay(2000); digitalWrite(LED,HIGH);
+    digitalWrite(LED,LOW); delay(2000); digitalWrite(LED,HIGH);delay(2000);
   } 
   bmp.setTemperatureOversampling(BMP3_OVERSAMPLING_8X);
   bmp.setPressureOversampling(BMP3_OVERSAMPLING_4X);
   bmp.setIIRFilterCoeff(BMP3_IIR_FILTER_COEFF_3);
   bmp.setOutputDataRate(BMP3_ODR_100_HZ);
-  
+
+  //bno.begin() is ran when the while loop criteria is tested... 
+  //default bno mode is OPERATION_MODE_NDOF
   while (!bno.begin()) {                         //flashes to signal error
     TELEMETRY_SERIAL.println(F("BNO055 err"));
-    digitalWrite(LED,LOW); delay(100); digitalWrite(LED,HIGH);
+    digitalWrite(LED,LOW); delay(100); digitalWrite(LED,HIGH);delay(100);
   }
+  //set BNO mode
+  bno.setMode(Adafruit_BNO055::OPERATION_MODE_NDOF);  //OPERATION_MODE_NDOF_FMC_OFF, see .cpp for all modes
+  bno.setAxisRemap(Adafruit_BNO055::REMAP_CONFIG_P5); //REMAP_CONFIG_P0 to P7 (1 default)
+  //bno.setAxisSign(Adafruit_BNO055::REMAP_SIGN_P7);  //REMAP_SIGN_P0 to P7 (1 default)
+  bno.setExtCrystalUse(true); 
   
   if (!SD.begin(BUILTIN_SDCARD)){
     TELEMETRY_SERIAL.println(F("SD err"));
-    digitalWrite(LED,LOW); delay(500); digitalWrite(LED,HIGH);
+    digitalWrite(LED,LOW); delay(500); digitalWrite(LED,HIGH);delay(500);
   }
   else {                                            // generates file name
     for (uint16_t nameCount = 0; nameCount < 1000; nameCount++) {
@@ -220,8 +288,11 @@ void setup() {
         dataFile = SD.open(filename, FILE_WRITE);
         TELEMETRY_SERIAL.print(F("\twriting "));
         TELEMETRY_SERIAL.println(filename);
-        dataFile.print(F("abs time,sys date,sys time,x angle,y angle,z angle,x gyro,y gyro,z gyro,bno temp,x mag,y mag,z mag,x accel,y accel,z accel"));
-        dataFile.println(F(",bmp alt,gps alt,gps lat,gps lon,gps vel,gps dir,xy_from_lanch,dir_from_launch,xy_to_land,xy_dir_to_land,x_to_land,y_to_land,bmp temp,bmp pressure,sats,hdop,vbatt1"));
+        dataFile.print(F("abs time,sys date,sys time,heading (psy),attitude (theta),bank (phi),x accel,x gyro,bmp alt,gps alt,bno alt"));
+        dataFile.print(F(",sats,hdop,vbatt1,y accel,z accel,y gyro,z gyro"));
+        dataFile.print(F(",gps lat,gps lon,gps vel,gps dir,xy_from_lanch,dir_from_launch"));
+        dataFile.print(F(",xy_to_land,xy_dir_to_land,x_to_land,y_to_land"));
+        dataFile.println(F(",bmp pressure,bmp temp,bno temp,qw,qx,qy,qz,test,x euler,y euler,z euler,x mag,y mag,z mag"));
         break;
       }
     }
@@ -241,8 +312,10 @@ void setup() {
   //so if someone wants to do that that'll work 
 
   S1.attach(PWM1);
-  //S1.attach(SERVO_PIN_A, 1000, 2000); //some motors need min/max setting
-  
+  //S1.attach(SERVO_PIN_A, 1000, 2000); //some motors need min/max setting ,ESCs go 1k-2k
+
+
+  smartDelay(1000*60);
 }
 
 
@@ -256,9 +329,32 @@ void loop() {
     euler         = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
     accelerometer = bno.getVector(Adafruit_BNO055::VECTOR_ACCELEROMETER);
     magnetometer  = bno.getVector(Adafruit_BNO055::VECTOR_MAGNETOMETER);
-    //quat = bno.getQuat(); //qw= quat.w(); or q[4]=[quat.w(),quat.x()...
+    q1 = bno.getQuat(); //qw= quat.w(); or q[4]=[quat.w(),quat.x()...
     temp = bno.getTemp();
 
+    sqw = q1.w()*q1.w();
+    sqx = q1.x()*q1.x();
+    sqy = q1.y()*q1.y();
+    sqz = q1.z()*q1.z();
+    unit = sqx + sqy + sqz + sqw; // if normalised is one, otherwise is correction factor
+    test = q1.x()*q1.y() + q1.z()*q1.w();
+    //when test is close to +/- .5, the imu is close to an euler singularity
+    if (test > 0.499*unit) { // singularity at north pole, >86.3 deg
+      heading = 2 * atan2(q1.x(),q1.w());
+      attitude = PI/2;
+      bank = 0;
+    }
+    if (test < -0.499*unit) { // singularity at south pole, <-86.3 deg
+      heading = -2 * atan2(q1.x(),q1.w());
+      attitude = -PI/2;
+      bank = 0;
+    }
+    heading = RAD_TO_DEG*atan2(2*q1.y()*q1.w()-2*q1.x()*q1.z() , sqx - sqy - sqz + sqw);
+    attitude = RAD_TO_DEG*asin(2*test/unit);
+    bank = RAD_TO_DEG*atan2(2*q1.x()*q1.w()-2*q1.y()*q1.z() , -sqx + sqy - sqz + sqw);
+
+    
+    
     for (int i=0;i<9;i++){
       bno_alt_new[i+1]=bno_alt_new[i]; //move every element 1 back 
     }
@@ -330,9 +426,6 @@ void loop() {
     //battery voltage read code will also go here:
     reading= analogRead(Batt_V_Read);
     vbatt1= reading*(3.3/1023.00)* voltage_divider_ratio;  //batt1_num_cells;
-    //while (Serial2.available()){
-    //  gps.encode(Serial2.read());
-    //}
     
     sats= gps.satellites.value();
     fix_hdop= gps.hdop.hdop(); 
@@ -351,7 +444,12 @@ void loop() {
     gps_e= TinyGPSPlus::distanceBetween(0, launch_lon, 0, gps_lon);
     gps_d=-gps_alt;
     
-    smartDelay(1000);
+    //smartDelay(300);
+    for(int n=0; n < 200 ;n++){ //100-300 is good... ~700 iterations can run per sec
+      while (Serial2.available()){
+        gps.encode(Serial2.read());
+      }
+    }
     
     for (int i=0;i<9;i++){
       gps_alt_new[i+1]=gps_alt_new[i]; //move every element 1 back 
@@ -426,10 +524,71 @@ void loop() {
 
 
 
-  
+  //Read Commands (STAND_BY / TERMINAL_COUNT aka on pad)
+  if(millis()-readtimer > read_dt){
+    
+    BEGIN_READ
+    READ_FLAG(c) {
+      heartbeat();
+    }
+    READ_FLAG(reset) {
+      TELEMETRY_SERIAL.println(F("Resetting board"));
+      reset();
+    }
+    READ_FLAG(s) {
+      start_countdown();
+    }
+    READ_FLAG(a) {
+      TELEMETRY_SERIAL.println(F("Manual abort initiated"));
+      abort_autosequence();
+    }
+    READ_FIELD(P1cmd, "%d", cmd) {
+      P1_setting= cmd;
+      digitalWrite(PYRO5,cmd);
+    }
+    READ_FIELD(P2cmd, "%d", cmd) {
+      P2_setting= cmd;
+      digitalWrite(PYRO5,cmd);
+    }
+    READ_FIELD(P3cmd, "%d", cmd) {
+      P3_setting= cmd;
+      digitalWrite(PYRO5,cmd);
+    }
+    READ_FIELD(P4cmd, "%d", cmd) {
+      P4_setting= cmd;
+      digitalWrite(PYRO5,cmd);
+    }
+    READ_FIELD(P5cmd, "%d", cmd) {
+      P5_setting= cmd;
+      digitalWrite(PYRO5,cmd);
+    }
+    
+    //not sure where the UI code sends this data- I
+    //don't see any variable named data_name in the
+    //static test driver py file, @Lucas?
+    READ_DEFAULT(data_name, data) {
+      TELEMETRY_SERIAL.print(F("Invalid data field recieved: "));
+      TELEMETRY_SERIAL.print(data_name);
+      TELEMETRY_SERIAL.print(":");
+      TELEMETRY_SERIAL.println(data);
+    }
+    END_READ
+    
+    readtimer=millis();
+  }
+
   
   // Downlink
   if(millis()-radiotimer > radio_dt){
+    if (millis() > heartbeat_time + HEARTBEAT_TIMEOUT) {
+      //TELEMETRY_SERIAL.println(F("Loss of data link"));
+      link2ground=0;
+      //abort_autosequence();
+    }
+    else{
+      link2ground=1;
+    }
+    
     BEGIN_SEND
     SEND_VECTOR_ITEM(euler_angle  , euler);
     SEND_VECTOR_ITEM(gyro         , gyroscope);
@@ -438,22 +597,36 @@ void loop() {
     SEND_VECTOR_ITEM(acceleration , accelerometer);
     SEND_ITEM(bmp_alt             , bmp_alt);
     SEND_ITEM(gps_alt             , gps_alt);
-    //SEND_ITEM(gps_lat             , gps_lat);
+    //SEND_ITEM(gps_lat           , gps_lat);
     TELEMETRY_SERIAL.print(F(";"));               
     TELEMETRY_SERIAL.print(F("gps_lat"));            
     TELEMETRY_SERIAL.print(F(":"));               
     TELEMETRY_SERIAL.print(gps_lat,5);//more digits of precision
-    //SEND_ITEM(gps_lon             , gps_lon);
+    //SEND_ITEM(gps_lon           , gps_lon);
     TELEMETRY_SERIAL.print(F(";"));               
     TELEMETRY_SERIAL.print(F("gps_lon"));            
     TELEMETRY_SERIAL.print(F(":"));               
     TELEMETRY_SERIAL.print(gps_lon,5);//more digits of precision
+    SEND_ITEM(heading             , heading);
+    SEND_ITEM(attitude            , attitude);
+    SEND_ITEM(bank                , bank);
+    SEND_ITEM(test                , test);
     SEND_ITEM(gps_vel             , gps_vel);
     SEND_ITEM(gps_dir             , gps_dir);
     SEND_ITEM(xy_from_lanch       , xy_from_lanch);
     SEND_ITEM(dir_from_launch     , dir_from_launch);
     SEND_ITEM(sats                , sats);
-    SEND_ITEM(vb1                , vbatt1);
+    SEND_ITEM(hdp                 , fix_hdop);
+    SEND_ITEM(vb1                 , vbatt1);
+    SEND_ITEM(ss                  , ss);
+    SEND_ITEM(run_time            , millis()-start_time-COUNTDOWN_DURATION);
+    SEND_ITEM(l2g                 , link2ground);
+    SEND_ITEM(P1_setting          , P1_setting);
+    SEND_ITEM(P2_setting          , P2_setting);
+    SEND_ITEM(P3_setting          , P3_setting);
+    SEND_ITEM(P4_setting          , P4_setting);
+    SEND_ITEM(P5_setting          , P5_setting);
+    
     END_SEND
     radiotimer=millis();  
   }
@@ -471,17 +644,27 @@ void loop() {
     dataFile.print(minute());   dataFile.print(':');
     dataFile.print(second());
     //writing sensor values
-    WRITE_CSV_VECTOR_ITEM(euler)
-    WRITE_CSV_VECTOR_ITEM(gyroscope)
-    WRITE_CSV_ITEM(temp)
-    WRITE_CSV_VECTOR_ITEM(magnetometer)
-    WRITE_CSV_VECTOR_ITEM(accelerometer)
+    WRITE_CSV_ITEM(heading)
+    WRITE_CSV_ITEM(attitude)
+    WRITE_CSV_ITEM(bank)
+    WRITE_CSV_ITEM(accelerometer.x())
+    WRITE_CSV_ITEM(gyroscope.x())
     WRITE_CSV_ITEM(bmp_alt)
     WRITE_CSV_ITEM(gps_alt)
+    WRITE_CSV_ITEM(bno_alt)
+    WRITE_CSV_ITEM(sats)
+    WRITE_CSV_ITEM(fix_hdop)
+    WRITE_CSV_ITEM(vbatt1)
+      //WRITE_CSV_VECTOR_ITEM(gyroscope)
+    WRITE_CSV_ITEM(accelerometer.y())
+    WRITE_CSV_ITEM(accelerometer.z())
+    WRITE_CSV_ITEM(gyroscope.y())
+    WRITE_CSV_ITEM(gyroscope.z())
+      //WRITE_CSV_VECTOR_ITEM(accelerometer)
     //WRITE_CSV_ITEM(gps_lat) //change to have more precision
     dataFile.print(F(", ")); dataFile.print(gps_lat,8);
     //WRITE_CSV_ITEM(gps_lon) //change to have more precision
-    dataFile.print(F(", ")); dataFile.print(gps_lat,8);
+    dataFile.print(F(", ")); dataFile.print(gps_lon,8);
     WRITE_CSV_ITEM(gps_vel)
     WRITE_CSV_ITEM(gps_dir)
     WRITE_CSV_ITEM(xy_from_lanch)
@@ -490,17 +673,29 @@ void loop() {
     WRITE_CSV_ITEM(xy_dir_to_land)
     WRITE_CSV_ITEM(x_to_land)
     WRITE_CSV_ITEM(y_to_land)
-    WRITE_CSV_ITEM(bmp_temp)
     WRITE_CSV_ITEM(bmp_pressure)
-    WRITE_CSV_ITEM(sats)
-    WRITE_CSV_ITEM(fix_hdop)
-    WRITE_CSV_ITEM(vbatt1)
+    WRITE_CSV_ITEM(bmp_temp)
+    WRITE_CSV_ITEM(temp)  //bno temp
+    WRITE_CSV_ITEM(q1.w())
+    WRITE_CSV_ITEM(q1.x())
+    WRITE_CSV_ITEM(q1.y())
+    WRITE_CSV_ITEM(q1.z())
+    WRITE_CSV_ITEM(test)
+    WRITE_CSV_VECTOR_ITEM(euler)
+    WRITE_CSV_VECTOR_ITEM(magnetometer)
+    WRITE_CSV_ITEM(link2ground)
+    
     dataFile.println();
     dataFile.flush();
     sdtimer=millis();  
   }
    
 }
+
+
+
+
+
 
 
 time_t getTeensy3Time()
@@ -517,4 +712,57 @@ static void smartDelay(unsigned long ms)
       gps.encode(Serial2.read());
     }
   } while (millis() - start < ms);
+}
+
+void start_countdown() {
+  #if CONFIGURATION != DEMO
+  if (!ss) {
+    TELEMETRY_SERIAL.println(F("Countdown aborted due to sensor failure"));
+    SET_STATE(STAND_BY) // Set state to signal countdown was aborted
+  } else
+  #endif
+  if (0) {  //replace 0 with any unacceptable initial states
+    TELEMETRY_SERIAL.println(F("Countdown aborted due to unexpected initial state"));
+    SET_STATE(STAND_BY) // Set state to signal countdown was aborted
+  }
+  else {
+    TELEMETRY_SERIAL.println(F("Countdown started"));
+    SET_STATE(TERMINAL_COUNT)
+    start_time = millis();
+    heartbeat();
+  }
+}
+
+void heartbeat() {
+  heartbeat_time = millis();
+}
+
+void write_state(const char *state_name) {
+  SEND(status, state_name);
+}
+
+void abort_autosequence() {   //need to check if data is still logged after an abort is triggered
+  TELEMETRY_SERIAL.println(F("Run aborted"));
+  switch (state) {
+    case STAND_BY:
+    case TERMINAL_COUNT:
+      SET_STATE(STAND_BY)
+      abort_time = millis();
+      break;
+
+    case IS_RISING:
+      //SET_STATE(STAND_BY)
+      abort_time = millis();
+      break;
+
+    case IS_FALLING:
+      //SET_STATE(STAND_BY)
+      abort_time = millis();
+      break;
+    
+    case LANDED:
+      SET_STATE(STAND_BY)
+      abort_time = millis();
+      break;
+  }
 }
