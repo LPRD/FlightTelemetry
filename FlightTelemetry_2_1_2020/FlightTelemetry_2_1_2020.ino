@@ -89,10 +89,10 @@ Adafruit_BNO055 bno = Adafruit_BNO055(55, 0x28, &Wire);//ID, Address, Wire
 //use the syntax &Wire1, 2,... for SDA1, 2,... //55 as the only argument also works
 #define bno_dt 50 //time in ms between samples for bno055
 
-//Remaining issues: I haven't been able to get I2C ports on the teensy working 
-//other than SDA0 and SCL0... there is some sytax involving "&Wire" 
-//above in the BNO setup that I think is supposed to be changed but 
-//I have already tried using Wire1 and &Wire1 but the BNO 
+//Remaining issues: I haven't been able to get I2C ports on the teensy working
+//other than SDA0 and SCL0... there is some sytax involving "&Wire"
+//above in the BNO setup that I think is supposed to be changed but
+//I have already tried using Wire1 and &Wire1 but the BNO
 //didnt give data when I connected it to the SCL1/SDA1 ports on the
 //teensy... long story short I could use some help here
 
@@ -154,9 +154,9 @@ unsigned int missed_deadlines = 0;
 double Launch_ALT= 300;  //Launch Alt above sea level in m- UPDATE B4 FLIGHT!!!
 double ATST= 100; //m above launch height- UPDATE B4 FLIGHT!!!
 //Apogee Trigger Safety Threshold- apogee detection/(parachute) triggering will not work below this pt
-                        
+
 //carry working gps to points and record positions- UPDATE B4 FLIGHT!!!
-double launch_lat= 44.975313; 
+double launch_lat= 44.975313;
 double launch_lon= -93.232216;
 double land_lat= (44.975313+.00035);
 double land_lon= (-93.232216+.00035);
@@ -199,18 +199,20 @@ double bno_alt_new [10]= {0,0,0,0,0,0,0,0,0,0};
 double bno_alt_last_avg= 0;
 double bno_alt_new_avg= 0;
 int bno_descending_counter= 0;
-bool bno_descending= 0;  
+bool bno_descending= 0;
 
 double bmp_temp;
 double bmp_pressure;
-double bmp_alt= 0;  
+double bmp_alt= 0;
 //can review alt data to get bmp vel, accel
-double bmp_alt_last [10]= {0,0,0,0,0,0,0,0,0,0};
-double bmp_alt_new [10]= {0,0,0,0,0,0,0,0,0,0};
+double bmp_alt_last [20]= {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
+//double bmp_alt_new [10]= {0,0,0,0,0,0,0,0,0,0};
 double bmp_alt_last_avg= 0;
 double bmp_alt_new_avg= 0;
 int bmp_descending_counter= 0;
-bool bmp_descending= 0;  
+bool bmp_descending= 0;
+int bmp_descending_counter2= 0;
+bool bmp_descending2= 0;
 
 //Cardinal= in the North/East/South/West plane, NO up/down component!
 int16_t sats;
@@ -236,7 +238,7 @@ double gps_alt_new [10]= {0,0,0,0,0,0,0,0,0,0};
 double gps_alt_last_avg= 0;
 double gps_alt_new_avg= 0;
 int gps_descending_counter= 0;
-bool gps_descending= 0;  
+bool gps_descending= 0;
 
 bool Apogee_Passed=0;
 
@@ -247,23 +249,23 @@ void setup() {
   setSyncProvider(getTeensy3Time);
   Serial2.begin(GPSBaud); //Serial2 is the radio
   TELEMETRY_SERIAL.begin(57600); TELEMETRY_SERIAL.println();
-  
+
   // Teensy RTC error/success config
   while (timeStatus()!= timeSet) {
     TELEMETRY_SERIAL.println(F("Teensy RTC err"));
     digitalWrite(LED,LOW); delay(5000); digitalWrite(LED,HIGH);delay(5000);
   }
-  
+
   while (!bmp.begin()) {                         //flashes to signal error
     TELEMETRY_SERIAL.println(F("BMP388 err"));
     digitalWrite(LED,LOW); delay(2000); digitalWrite(LED,HIGH);delay(2000);
-  } 
+  }
   bmp.setTemperatureOversampling(BMP3_OVERSAMPLING_8X);
   bmp.setPressureOversampling(BMP3_OVERSAMPLING_4X);
   bmp.setIIRFilterCoeff(BMP3_IIR_FILTER_COEFF_3);
   bmp.setOutputDataRate(BMP3_ODR_100_HZ);
 
-  //bno.begin() is ran when the while loop criteria is tested... 
+  //bno.begin() is ran when the while loop criteria is tested...
   //default bno mode is OPERATION_MODE_NDOF
   while (!bno.begin()) {                         //flashes to signal error
     TELEMETRY_SERIAL.println(F("BNO055 err"));
@@ -273,8 +275,8 @@ void setup() {
   bno.setMode(Adafruit_BNO055::OPERATION_MODE_NDOF);  //OPERATION_MODE_NDOF_FMC_OFF, see .cpp for all modes
   bno.setAxisRemap(Adafruit_BNO055::REMAP_CONFIG_P5); //REMAP_CONFIG_P0 to P7 (1 default)
   //bno.setAxisSign(Adafruit_BNO055::REMAP_SIGN_P7);  //REMAP_SIGN_P0 to P7 (1 default)
-  bno.setExtCrystalUse(true); 
-  
+  bno.setExtCrystalUse(true);
+
   if (!SD.begin(BUILTIN_SDCARD)){
     TELEMETRY_SERIAL.println(F("SD err"));
     digitalWrite(LED,LOW); delay(500); digitalWrite(LED,HIGH);delay(500);
@@ -309,7 +311,7 @@ void setup() {
   digitalWrite(PYRO4,LOW);
   digitalWrite(PYRO5,LOW);
   //this could probably be done w/ a loop in fewer lines
-  //so if someone wants to do that that'll work 
+  //so if someone wants to do that that'll work
 
   S1.attach(PWM1);
   //S1.attach(SERVO_PIN_A, 1000, 2000); //some motors need min/max setting ,ESCs go 1k-2k
@@ -323,7 +325,7 @@ void setup() {
 
 void loop() {
   long time0 = millis();  //I don't think we need this
-  
+
   if(millis()-bnotimer > bno_dt){
     gyroscope     = bno.getVector(Adafruit_BNO055::VECTOR_GYROSCOPE);
     euler         = bno.getVector(Adafruit_BNO055::VECTOR_EULER);
@@ -353,13 +355,13 @@ void loop() {
     attitude = RAD_TO_DEG*asin(2*test/unit);
     bank = RAD_TO_DEG*atan2(2*q1.x()*q1.w()-2*q1.y()*q1.z() , -sqx + sqy - sqz + sqw);
 
-    
-    
+
+
     for (int i=0;i<9;i++){
-      bno_alt_new[i+1]=bno_alt_new[i]; //move every element 1 back 
+      bno_alt_new[i+1]=bno_alt_new[i]; //move every element 1 back
     }
     bno_alt_new[0]= bno_alt; //now array fully updated
-    
+
     for (int i=0;i<10;i++){
       sum=sum+bno_alt_new[i];
     }
@@ -369,73 +371,86 @@ void loop() {
     if((bno_alt_last_avg > bno_alt_new_avg) && (bno_alt > Launch_ALT + ATST)){
       bno_descending_counter= bno_descending_counter + 1;
     }
-    
+
     for (int i=0;i<10;i++){
       bno_alt_last[i]= bno_alt_new[i];
     } //prev alts now = current alts
     bno_alt_last_avg= bno_alt_new_avg;
-  
-  
-    
+
+
+
     bnotimer= millis();
   }
 
   if(bno_descending != 1){
-    if((bno_descending_counter>9)&& (bno_alt > Launch_ALT + ATST)){ 
+    if((bno_descending_counter>9)&& (bno_alt > Launch_ALT + ATST)){
       bno_descending = 1;
     }
   }
 
-  
+
   if(millis()-bmptimer > bmp_dt){
     bmp_temp= bmp.temperature; //in Celcius, do I need int8_t type????
-    bmp_pressure= bmp.pressure / 100.0; //hPa or mbar 
+    bmp_pressure= bmp.pressure / 100.0; //hPa or mbar
     bmp_alt= bmp.readAltitude(SEALEVELPRESSURE_HPA); //m
-    for (int i=0;i<9;i++){
-      bmp_alt_new[i+1]=bmp_alt_new[i]; //move every element 1 back 
+
+    //shift everthing one back
+    for (int i=0;i<19;i++){
+      bmp_alt_last[i+1]=bmp_alt_last[i]; //move every element 1 back, [19] now forgotten
     }
-    bmp_alt_new[0]= bmp_alt; //now array fully updated
-    
+    bmp_alt_last[0]= bmp_alt; //now array fully updated
+
     for (int i=0;i<10;i++){
-      sum=sum+bmp_alt_new[i];
+      sum=sum+bmp_alt_last[i];
     }
-    bmp_alt_new_avg= sum/10.0;
+    bmp_alt_new_avg= sum/10.0;  //avg alt over the most recent 10 data points
     sum=0;  //reset sum var for next use
+
+    for (int i=10;i<20;i++){
+      sum=sum+bmp_alt_last[i];
+    }
+    bmp_alt_last_avg= sum/10.0; //avg alt over the oldest 10 data points
+    sum=0;
 
     if((bmp_alt_last_avg > bmp_alt_new_avg) && (bmp_alt > Launch_ALT + ATST)){
       bmp_descending_counter= bmp_descending_counter + 1;
     }
-    
-    for (int i=0;i<10;i++){
-      bmp_alt_last[i]= bmp_alt_new[i];
-    } //prev alts now = current alts
-    bmp_alt_last_avg= bmp_alt_new_avg;
-  
-    
+
+    if((bmp_alt_last[19] > bmp_alt_last[0]) && (bmp_alt > Launch_ALT + ATST)){
+      bmp_descending_counter2= bmp_descending_counter2 + 1;
+    }
+
+
     bmptimer= millis();
   }
 
   if(bmp_descending != 1){
-    if((bmp_descending_counter>9)&& (bmp_alt > Launch_ALT + ATST)){ 
+    if((bmp_descending_counter>9) && (bmp_alt > Launch_ALT + ATST)){
       bmp_descending = 1;
     }
   }
-  
-  
+
+  if(bmp_descending2 != 1){
+    if((bmp_descending_counter2 >9) && (bmp_alt > Launch_ALT + ATST)){
+      bmp_descending2 = 1;
+    }
+  }
+
+
   if(millis()-gpstimer > gps_dt){
     //battery voltage read code will also go here:
     reading= analogRead(Batt_V_Read);
     vbatt1= reading*(3.3/1023.00)* voltage_divider_ratio;  //batt1_num_cells;
-    
+
     sats= gps.satellites.value();
-    fix_hdop= gps.hdop.hdop(); 
+    fix_hdop= gps.hdop.hdop();
     gps_lat= gps.location.lat();
     gps_lon= gps.location.lng();
     gps_alt= gps.altitude.meters();
-    gps_vel= gps.speed.mps(); 
-    gps_dir= gps.course.deg(); 
+    gps_vel= gps.speed.mps();
+    gps_dir= gps.course.deg();
     xy_from_lanch= TinyGPSPlus::distanceBetween(launch_lat, launch_lon, gps_lat, gps_lon);
-    dir_from_launch= TinyGPSPlus::courseTo(launch_lat, launch_lon, gps_lat, gps_lon);  
+    dir_from_launch= TinyGPSPlus::courseTo(launch_lat, launch_lon, gps_lat, gps_lon);
     xy_to_land= TinyGPSPlus::distanceBetween(gps_lat, gps_lon, land_lat, land_lon);
     xy_dir_to_land= TinyGPSPlus::courseTo(gps_lat, gps_lon, launch_lat, launch_lon);
     x_to_land= TinyGPSPlus::distanceBetween(0, gps_lon, 0, land_lon);
@@ -443,19 +458,19 @@ void loop() {
     gps_n= TinyGPSPlus::distanceBetween(launch_lat, 0, gps_lat, 0);
     gps_e= TinyGPSPlus::distanceBetween(0, launch_lon, 0, gps_lon);
     gps_d=-gps_alt;
-    
+
     //smartDelay(300);
     for(int n=0; n < 200 ;n++){ //100-300 is good... ~700 iterations can run per sec
       while (Serial2.available()){
         gps.encode(Serial2.read());
       }
     }
-    
+
     for (int i=0;i<9;i++){
-      gps_alt_new[i+1]=gps_alt_new[i]; //move every element 1 back 
+      gps_alt_new[i+1]=gps_alt_new[i]; //move every element 1 back
     }
     gps_alt_new[0]= gps_alt; //now array fully updated
-    
+
     for (int i=0;i<10;i++){
       sum=sum+gps_alt_new[i];
     }
@@ -465,18 +480,18 @@ void loop() {
     if((gps_alt_last_avg > gps_alt_new_avg) && (bmp_alt > Launch_ALT + ATST)){
       gps_descending_counter= gps_descending_counter + 1;
     }
-    
+
     for (int i=0;i<10;i++){
       gps_alt_last[i]= gps_alt_new[i];
     } //prev alts now = current alts
     gps_alt_last_avg= gps_alt_new_avg;
 
-    
+
     gpstimer=millis();
-  }   
+  }
 
   if(gps_descending != 1){
-    if((gps_descending_counter>9)&& (bmp_alt > Launch_ALT + ATST)){ 
+    if((gps_descending_counter>9)&& (bmp_alt > Launch_ALT + ATST)){
       gps_descending = 1;
     }
   }
@@ -485,48 +500,48 @@ void loop() {
   if(millis()-falltimer > fall_dt){
     //Code that is active before Apogee is Reached/Passed
     if(Apogee_Passed !=1){
-      
+
       //S1.write(pos1);
-      
+
       //The following loop only trigger ONCE (when apogee is detected)
-      if((gps_descending*1)+(bmp_descending*1)+(bno_descending*1) > 1){
+      if((gps_descending*1)+(bmp_descending*1)+(bmp_descending2*1)+(bno_descending*1) > 1){
         Apogee_Passed=1;
         //fire drouge chute
-        digitalWrite(PYRO1,HIGH);        
+        digitalWrite(PYRO1,HIGH);
         //for(pos = 180; pos >=1; pos -= 1){ //close a servo all the way
-        //  S1.write(pos); 
-        //  delay(30); 
+        //  S1.write(pos);
+        //  delay(30);
         //}
       }
     }
     //Continuous code that runs once Apogee is Reached/Passed
-    if(Apogee_Passed = 1){
+    if(Apogee_Passed == 1){
       //insert code here, ex: wait to fire main chutes
-  
-      if(bmp_alt < Launch_ALT + ATST + 50){
-        digitalWrite(PYRO2,HIGH); //fire main chute, just an example
 
-        //would need another trigger lock to ensure this loop doesn't 
+      if(bmp_alt < Launch_ALT + ATST + 10){
+        digitalWrite(PYRO3,HIGH); //fire main chute, just an example
+
+        //would need another trigger lock to ensure this loop doesn't
         //keep repeating on every iteration...
         //for(pos = 0; pos < 180; pos+=1) { //open a servo all the way
         //  S1.write(pos);
         //  delay(30);
         //}
-        
+
         //S1.write(pos1);
       }
-      
+
     }
 
     falltimer=millis();
-  } 
+  }
 
 
 
 
   //Read Commands (STAND_BY / TERMINAL_COUNT aka on pad)
   if(millis()-readtimer > read_dt){
-    
+
     BEGIN_READ
     READ_FLAG(c) {
       heartbeat();
@@ -544,46 +559,46 @@ void loop() {
     }
     READ_FIELD(P1cmd, "%d", cmd) {
       P1_setting= cmd;
-      digitalWrite(PYRO5,cmd);
+      digitalWrite(PYRO1,cmd);
     }
     READ_FIELD(P2cmd, "%d", cmd) {
       P2_setting= cmd;
-      digitalWrite(PYRO5,cmd);
+      digitalWrite(PYRO2,cmd);
     }
     READ_FIELD(P3cmd, "%d", cmd) {
       P3_setting= cmd;
-      digitalWrite(PYRO5,cmd);
+      digitalWrite(PYRO3,cmd);
     }
     READ_FIELD(P4cmd, "%d", cmd) {
       P4_setting= cmd;
-      digitalWrite(PYRO5,cmd);
+      digitalWrite(PYRO4,cmd);
     }
     READ_FIELD(P5cmd, "%d", cmd) {
       P5_setting= cmd;
       digitalWrite(PYRO5,cmd);
     }
-    READ_FIELD(Launch_ALT, "%d", val) {
+    READ_FIELD(Launch_ALT, "%f", val) {
       Launch_ALT= val;
     }
-    READ_FIELD(BMP_cf, "%d", val) {
+    READ_FIELD(BMP_cf, "%f", val) {
       SEALEVELPRESSURE_HPA= val;
     }
-    READ_FIELD(ATST, "%d", val) {
+    READ_FIELD(ATST, "%f", val) {
       ATST= val;
     }
-    READ_FIELD(launch_lat, "%d", val) {
+    READ_FIELD(launch_lat, "%f", val) {
       launch_lat= val;
     }
-    READ_FIELD(launch_lon, "%d", val) {
+    READ_FIELD(launch_lon, "%f", val) {
       launch_lon= val;
     }
-    READ_FIELD(land_lat, "%d", val) {
+    READ_FIELD(land_lat, "%f", val) {
       land_lat= val;
     }
-    READ_FIELD(land_lon, "%d", val) {
+    READ_FIELD(land_lon, "%f", val) {
       land_lon= val;
     }
-    
+
     //not sure where the UI code sends this data- I
     //don't see any variable named data_name in the
     //static test driver py file, @Lucas?
@@ -594,11 +609,11 @@ void loop() {
       TELEMETRY_SERIAL.println(data);
     }
     END_READ
-    
+
     readtimer=millis();
   }
 
-  
+
   // Downlink
   if(millis()-radiotimer > radio_dt){
     if (millis() > heartbeat_time + HEARTBEAT_TIMEOUT) {
@@ -609,53 +624,72 @@ void loop() {
     else{
       link2ground=1;
     }
-    
+
+    long run_time = millis() - start_time - COUNTDOWN_DURATION;
+    SEND(run_time, run_time)
+
+
     BEGIN_SEND
-    SEND_VECTOR_ITEM(euler_angle  , euler);
-    SEND_VECTOR_ITEM(gyro         , gyroscope);
-    SEND_ITEM(temperature         , temp);
-    SEND_VECTOR_ITEM(magnetometer , magnetometer);
-    SEND_VECTOR_ITEM(acceleration , accelerometer);
-    SEND_ITEM(bmp_alt             , bmp_alt);
-    SEND_ITEM(gps_alt             , gps_alt);
-    //SEND_ITEM(gps_lat           , gps_lat);
-    TELEMETRY_SERIAL.print(F(";"));               
-    TELEMETRY_SERIAL.print(F("gps_lat"));            
-    TELEMETRY_SERIAL.print(F(":"));               
+    SEND_VECTOR_ITEM(euler_angle  , euler)
+    SEND_VECTOR_ITEM(gyro         , gyroscope)
+    SEND_ITEM(temperature         , temp)
+    SEND_VECTOR_ITEM(magnetometer , magnetometer)
+    SEND_VECTOR_ITEM(acceleration , accelerometer)
+    SEND_ITEM(bmp_alt             , bmp_alt)
+    SEND_ITEM(gps_alt             , gps_alt)
+    //SEND_ITEM(gps_lat           , gps_lat)
+    TELEMETRY_SERIAL.print(F(";"));
+    TELEMETRY_SERIAL.print(F("gps_lat"));
+    TELEMETRY_SERIAL.print(F(":"));
     TELEMETRY_SERIAL.print(gps_lat,5);//more digits of precision
-    //SEND_ITEM(gps_lon           , gps_lon);
-    TELEMETRY_SERIAL.print(F(";"));               
-    TELEMETRY_SERIAL.print(F("gps_lon"));            
-    TELEMETRY_SERIAL.print(F(":"));               
+    //SEND_ITEM(gps_lon           , gps_lon)
+    TELEMETRY_SERIAL.print(F(";"));
+    TELEMETRY_SERIAL.print(F("gps_lon"));
+    TELEMETRY_SERIAL.print(F(":"));
     TELEMETRY_SERIAL.print(gps_lon,5);//more digits of precision
-    SEND_ITEM(heading             , heading);
-    SEND_ITEM(attitude            , attitude);
-    SEND_ITEM(bank                , bank);
-    SEND_ITEM(test                , test);
-    SEND_ITEM(gps_vel             , gps_vel);
-    SEND_ITEM(gps_dir             , gps_dir);
-    SEND_ITEM(xy_from_lanch       , xy_from_lanch);
-    SEND_ITEM(dir_from_launch     , dir_from_launch);
-    SEND_ITEM(sats                , sats);
-    SEND_ITEM(hdp                 , fix_hdop);
-    SEND_ITEM(vb1                 , vbatt1);
-    SEND_ITEM(ss                  , ss);
-    SEND_ITEM(run_time            , millis()-start_time-COUNTDOWN_DURATION);
-    SEND_ITEM(l2g                 , link2ground);
-    SEND_ITEM(P1_setting          , P1_setting);
-    SEND_ITEM(P2_setting          , P2_setting);
-    SEND_ITEM(P3_setting          , P3_setting);
-    SEND_ITEM(P4_setting          , P4_setting);
-    SEND_ITEM(P5_setting          , P5_setting);
-    
+    SEND_ITEM(heading             , heading)
+    SEND_ITEM(attitude            , attitude)
+    SEND_ITEM(bank                , bank)
+    SEND_ITEM(test                , test)
+    SEND_ITEM(gps_vel             , gps_vel)
+    SEND_ITEM(gps_dir             , gps_dir)
+    SEND_ITEM(xy_from_lanch       , xy_from_lanch)
+    SEND_ITEM(dir_from_launch     , dir_from_launch)
+    SEND_ITEM(sats                , sats)
+    SEND_ITEM(hdp                 , fix_hdop)
+    SEND_ITEM(vb1                 , vbatt1)
+    SEND_ITEM(ss                  , ss)
+    //SEND_ITEM(run_time            , millis()-start_time-COUNTDOWN_DURATION);
+    SEND_ITEM(l2g                 , link2ground)
+    SEND_ITEM(P1_setting          , P1_setting)
+    SEND_ITEM(P2_setting          , P2_setting)
+    SEND_ITEM(P3_setting          , P3_setting)
+    SEND_ITEM(P4_setting          , P4_setting)
+    SEND_ITEM(P5_setting          , P5_setting)
+    SEND_ITEM(gps_d               , gps_descending)
+    SEND_ITEM(bmp_d               , bmp_descending)
+    SEND_ITEM(bmp_d2              , bmp_descending2)
+    SEND_ITEM(bno_d               , bno_descending)
+    SEND_ITEM(Apogee_Passed       , Apogee_Passed)
+
+    SEND_ITEM(ATST                , ATST)
+    SEND_ITEM(Launch_ALT          , Launch_ALT)
+    SEND_ITEM(BMPcf               , SEALEVELPRESSURE_HPA)
+    SEND_ITEM(launch_lat          , launch_lat)
+    SEND_ITEM(launch_lon          , launch_lon)
+    SEND_ITEM(land_lat            , land_lat)
+    SEND_ITEM(land_lon            , land_lon)
+
+    SEND_ITEM(Apogee_Passed       , Apogee_Passed)
+
     END_SEND
-    radiotimer=millis();  
+    radiotimer=millis();
   }
-  
-  
+
+
   // Writing to SD Card
   if(millis()-sdtimer > sd_dt){
-    //writing abs time,sys date,sys time 
+    //writing abs time,sys date,sys time
     dataFile.print(millis());           dataFile.print(',');
     //might need to do: dataFile.print(year()  ,DEC);   DEC format
     dataFile.print(year());   dataFile.print('/');
@@ -705,12 +739,12 @@ void loop() {
     WRITE_CSV_VECTOR_ITEM(euler)
     WRITE_CSV_VECTOR_ITEM(magnetometer)
     WRITE_CSV_ITEM(link2ground)
-    
+
     dataFile.println();
     dataFile.flush();
-    sdtimer=millis();  
+    sdtimer=millis();
   }
-   
+
 }
 
 
@@ -727,7 +761,7 @@ time_t getTeensy3Time()
 static void smartDelay(unsigned long ms)
 {
   unsigned long start = millis();
-  do 
+  do
   {
     while (Serial2.available()){
       gps.encode(Serial2.read());
@@ -780,7 +814,7 @@ void abort_autosequence() {   //need to check if data is still logged after an a
       //SET_STATE(STAND_BY)
       abort_time = millis();
       break;
-    
+
     case LANDED:
       SET_STATE(STAND_BY)
       abort_time = millis();
