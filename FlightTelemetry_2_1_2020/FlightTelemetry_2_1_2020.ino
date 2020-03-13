@@ -21,8 +21,13 @@
 long heartbeat_time = 0;
 bool link2ground = 1;
 bool cmd; //for pyro channels
-double val; //read value for ground config
+float val; //read value for ground config
 bool P1_setting,P2_setting,P3_setting,P4_setting,P5_setting= 0;
+
+char send1[150]= "";
+char send2[150]= "";
+char send3[150]= "";
+char send4[150]= "";
 
 
 #if CONFIGURATION == DEMO
@@ -33,27 +38,45 @@ bool P1_setting,P2_setting,P3_setting,P4_setting,P5_setting= 0;
 
 long abort_time= 0;
 long start_time = 0;
+long run_time= 0;
 bool ss = true; //ss stands for sensor_status
+
 
 char data[10] = "";
 char data_name[20] = "";
 
 typedef enum {
   STAND_BY,
-  TERMINAL_COUNT,
-  IS_RISING,
-  IS_FALLING,
-  LANDED
+  TERMINAL_COUNT,   //button activated
+  POWERED_ASCENT,   //if (run_time>0) && (state==TERMINAL_COUNT) && (run_time<BURN_TIME)
+  UNPOWERED_ASCENT, //if (state==POWERED_ASCENT) && (run_time>BURN_TIME)
+  FREEFALL,         //if (state==UNPOWERED_ASCENT) && (Apogee_Passed == 1)
+  DROGUE_DESCENT,   //if (state==FREEFALL) && (DROGUE_FIRED==1)
+  MAIN_DESCENT,     //if (state==DROGUE_DESCENT) && (MAIN_FIRED==1)
+  LANDED            //if (state==MAIN_DESCENT) && (bmp_alt < Launch_ALT + 5)
 } state_t;
 
 state_t state = STAND_BY;
 
-// Convenience
-#define SET_STATE(STATE) {    \
-    state = STATE;            \
-    write_state(#STATE);      \
-  }
+bool IS_RISING=0;
+bool IS_FALLING=0;
+int BURN_TIME= 3000; //ms
+bool DROGUE_FIRED= 0;
+bool MAIN_FIRED= 0;
 
+// /*
+// Convenience
+#define SET_STATE(STATE) //{    \
+    state = STATE;      write_state(#STATE);       \
+         \
+//}
+// */
+
+ /*
+void SET_STATE(state_t STATE){
+  state= STATE;
+}
+*/
 
 
 void (*reset)(void) = 0;
@@ -80,7 +103,7 @@ TinyGPSPlus gps;
 
 //UPDATE B4 FLIGHT!!!
 //Calibration Factor for BMP388, chech local pressure b4 flight!
-double SEALEVELPRESSURE_HPA= 1013.25;  //in units of 100* Pa
+float SEALEVELPRESSURE_HPA= 1013.25;  //in units of 100* Pa
 Adafruit_BMP3XX bmp(BMP_CS, BMP_MOSI, BMP_MISO,  BMP_SCK);  //software SPI
 #define bmp_dt 100 //time in ms between samples for bmp388
 
@@ -151,15 +174,15 @@ int pos1 = 90;
 unsigned int missed_deadlines = 0;
 
 //BMP calibration factor is ABOVE in the code ^
-double Launch_ALT= 300;  //Launch Alt above sea level in m- UPDATE B4 FLIGHT!!!
-double ATST= 100; //m above launch height- UPDATE B4 FLIGHT!!!
+float Launch_ALT= 300;  //Launch Alt above sea level in m- UPDATE B4 FLIGHT!!!
+float ATST= 100; //m above launch height- UPDATE B4 FLIGHT!!!
 //Apogee Trigger Safety Threshold- apogee detection/(parachute) triggering will not work below this pt
 
 //carry working gps to points and record positions- UPDATE B4 FLIGHT!!!
-double launch_lat= 44.975313;
+float launch_lat= 44.975313;
 double launch_lon= -93.232216;
-double land_lat= (44.975313+.00035);
-double land_lon= (-93.232216+.00035);
+float land_lat= (44.975313+.00035);
+float land_lon= (-93.232216+.00035);
 
 long gpstimer= 0;
 long radiotimer= 0;
@@ -168,7 +191,7 @@ long bmptimer= 0;
 long bnotimer= 0;
 long sdtimer= 0;
 long falltimer=0;
-#define fall_dt 10
+#define fall_dt 50
 
 
 imu::Vector<3> gyroscope;
@@ -244,6 +267,98 @@ bool Apogee_Passed=0;
 
 double sum=0;
 
+//time_t getTeensy3Time;
+
+
+time_t getTeensy3Time(){
+  return Teensy3Clock.get();
+}
+
+static void smartDelay(unsigned long ms){
+  unsigned long start = millis();
+  do
+  {
+    while (Serial2.available()){
+      gps.encode(Serial2.read());
+    }
+  } while (millis() - start < ms);
+}
+
+void start_countdown() {
+  #if CONFIGURATION != DEMO
+    if (!ss) {
+      TELEMETRY_SERIAL.println(F("Countdown aborted due to sensor failure"));
+      SET_STATE(STAND_BY); // Set state to signal countdown was aborted
+    } 
+    else{
+      //do nothing
+    }
+  #endif
+  if (0) {  //replace 0 with any unacceptable initial states
+    TELEMETRY_SERIAL.println(F("Countdown aborted due to unexpected initial state"));
+    SET_STATE(STAND_BY); // Set state to signal countdown was aborted
+  }
+  else {
+    TELEMETRY_SERIAL.println(F("Countdown started"));
+    SET_STATE(TERMINAL_COUNT);
+    start_time = millis();
+    heartbeat();
+  }
+}
+
+void heartbeat() {
+  heartbeat_time = millis();
+}
+
+void write_state(const char *state_name) {
+  //SEND(status, state_name);
+}
+
+void abort_autosequence() {   //need to check if data is still logged after an abort is triggered
+  TELEMETRY_SERIAL.println(F("Run aborted"));
+  switch (state) {
+    case STAND_BY:
+    case TERMINAL_COUNT:
+      SET_STATE(STAND_BY);
+      abort_time = millis();
+      break;
+
+    case POWERED_ASCENT:
+      //SET_STATE(STAND_BY);
+      abort_time = millis();
+      break;
+
+    case UNPOWERED_ASCENT:
+      //SET_STATE(STAND_BY)'
+      abort_time = millis();
+      break;
+      
+    case FREEFALL:
+      //SET_STATE(STAND_BY)
+      abort_time = millis();
+      break;
+
+    case DROGUE_DESCENT:
+      //SET_STATE(STAND_BY)
+      abort_time = millis();
+      break;
+      
+    case MAIN_DESCENT:
+      //SET_STATE(STAND_BY)
+      abort_time = millis();
+      break;
+      
+    case LANDED:
+      SET_STATE(STAND_BY);
+      abort_time = millis();
+      break;
+  }
+}
+
+
+
+
+
 
 void setup() {
   setSyncProvider(getTeensy3Time);
@@ -273,7 +388,7 @@ void setup() {
   }
   //set BNO mode
   bno.setMode(Adafruit_BNO055::OPERATION_MODE_NDOF);  //OPERATION_MODE_NDOF_FMC_OFF, see .cpp for all modes
-  bno.setAxisRemap(Adafruit_BNO055::REMAP_CONFIG_P5); //REMAP_CONFIG_P0 to P7 (1 default)
+  bno.setAxisRemap(Adafruit_BNO055::REMAP_CONFIG_P1); //REMAP_CONFIG_P0 to P7 (1 default)
   //bno.setAxisSign(Adafruit_BNO055::REMAP_SIGN_P7);  //REMAP_SIGN_P0 to P7 (1 default)
   bno.setExtCrystalUse(true);
 
@@ -294,7 +409,7 @@ void setup() {
         dataFile.print(F(",sats,hdop,vbatt1,y accel,z accel,y gyro,z gyro"));
         dataFile.print(F(",gps lat,gps lon,gps vel,gps dir,xy_from_lanch,dir_from_launch"));
         dataFile.print(F(",xy_to_land,xy_dir_to_land,x_to_land,y_to_land"));
-        dataFile.println(F(",bmp pressure,bmp temp,bno temp,qw,qx,qy,qz,test,x euler,y euler,z euler,x mag,y mag,z mag"));
+        dataFile.println(F(",bmp pressure,bmp temp,bno temp,qw,qx,qy,qz,test,x euler,y euler,z euler,x mag,y mag,z mag,l2g"));
         break;
       }
     }
@@ -317,7 +432,7 @@ void setup() {
   //S1.attach(SERVO_PIN_A, 1000, 2000); //some motors need min/max setting ,ESCs go 1k-2k
 
 
-  smartDelay(1000*60);
+  smartDelay(1000*30);
 }
 
 
@@ -412,14 +527,28 @@ void loop() {
     bmp_alt_last_avg= sum/10.0; //avg alt over the oldest 10 data points
     sum=0;
 
-    if((bmp_alt_last_avg > bmp_alt_new_avg) && (bmp_alt > Launch_ALT + ATST)){
+    if((bmp_alt_last_avg > bmp_alt_new_avg) && (bmp_alt > (Launch_ALT + ATST))){
       bmp_descending_counter= bmp_descending_counter + 1;
+      IS_RISING= 0;
+      IS_FALLING= 1;
     }
 
-    if((bmp_alt_last[19] > bmp_alt_last[0]) && (bmp_alt > Launch_ALT + ATST)){
+    if((bmp_alt_last[19] > bmp_alt_last[0]) && (bmp_alt > (Launch_ALT + ATST))){
       bmp_descending_counter2= bmp_descending_counter2 + 1;
     }
 
+    if((bmp_alt_last_avg < bmp_alt_new_avg)){
+      IS_RISING= 1;
+      IS_FALLING= 0;
+    }
+    else if( abs(bmp_alt_last_avg - bmp_alt_new_avg) < .3){  //vertical velocity less than .3 m/s
+      IS_RISING= 0;
+      IS_FALLING= 0;  
+    }
+    else{
+      IS_RISING= 0;
+      IS_FALLING= 1; 
+    }
 
     bmptimer= millis();
   }
@@ -497,7 +626,28 @@ void loop() {
   }
 
 
+
   if(millis()-falltimer > fall_dt){
+    //state machine:
+    if ( (run_time>0) && (state==TERMINAL_COUNT) && (run_time<BURN_TIME) ){
+      SET_STATE(POWERED_ASCENT);
+    }    
+    if ( (state==POWERED_ASCENT) && (run_time>BURN_TIME) ){
+      SET_STATE(UNPOWERED_ASCENT);
+    }
+    if ( (state==UNPOWERED_ASCENT) && (Apogee_Passed == 1) ){
+      SET_STATE(FREEFALL);
+    }
+    if ( (state==FREEFALL) && (DROGUE_FIRED==1) ){
+      SET_STATE(DROGUE_DESCENT);
+    }
+    if ( (state==DROGUE_DESCENT) && (MAIN_FIRED==1) ){
+      SET_STATE(MAIN_DESCENT);
+    }
+    if ( (state==MAIN_DESCENT) && (bmp_alt < Launch_ALT + 2) ){
+      SET_STATE(LANDED);
+    }
+  
     //Code that is active before Apogee is Reached/Passed
     if(Apogee_Passed !=1){
 
@@ -508,6 +658,8 @@ void loop() {
         Apogee_Passed=1;
         //fire drouge chute
         digitalWrite(PYRO1,HIGH);
+        DROGUE_FIRED= 1;
+        
         //for(pos = 180; pos >=1; pos -= 1){ //close a servo all the way
         //  S1.write(pos);
         //  delay(30);
@@ -518,9 +670,11 @@ void loop() {
     if(Apogee_Passed == 1){
       //insert code here, ex: wait to fire main chutes
 
-      if(bmp_alt < Launch_ALT + ATST + 10){
+      if(bmp_alt < Launch_ALT + ATST + 1){
         digitalWrite(PYRO3,HIGH); //fire main chute, just an example
+        MAIN_FIRED= 1;
 
+        
         //would need another trigger lock to ensure this loop doesn't
         //keep repeating on every iteration...
         //for(pos = 0; pos < 180; pos+=1) { //open a servo all the way
@@ -625,10 +779,28 @@ void loop() {
       link2ground=1;
     }
 
-    long run_time = millis() - start_time - COUNTDOWN_DURATION;
-    SEND(run_time, run_time)
+    //both run_time and start_time = 0 until countdown started
+    if(run_time >0 || start_time >0){
+      if(state != LANDED){
+        run_time= millis() - start_time - COUNTDOWN_DURATION;
+      }
+    }
 
-
+    //abs time, sys time, sys date
+    //Send Fomat for Matlab UI (uncomment as needed)
+      /*
+    sprintf(send1,"@@@@@,%u,%u/%u/%u,%u:%u:%u,%.2f,%.2f,%.5f,%.5f,%.2f,%.2f,%.2f,%u",millis(),year(),month(),day(),hour(),minute(),second(),bmp_alt,gps_alt,gps_lat,gps_lon,vbatt1,test,fix_hdop,sats);
+    sprintf(send2,",%.3f,%.3f,%.3f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f,%.1f",heading,attitude,bank,euler.x(),euler.y(),euler.z(),magnetometer.x(),magnetometer.y(),magnetometer.z(),gyroscope.x(),gyroscope.y(),gyroscope.z(),accelerometer.x(),accelerometer.y(),accelerometer.z());
+    sprintf(send3,",%.1f,%.1f,%.1f,%.1f,%.1f,%u,%u,%u,%u,%u,%u,%.1f,%.1f,%.1f,%.5f,%.5f,%.5f,%.5f",temp,gps_vel,gps_dir,xy_from_lanch,dir_from_launch,run_time,P1_setting,P2_setting,P3_setting,P4_setting,P5_setting,ATST,Launch_ALT,SEALEVELPRESSURE_HPA,launch_lat,launch_lon,land_lat,land_lon);
+    sprintf(send4,",%u,%u,%u,%u,%s,%u,%u,%u,&&&&&",gps_descending,bmp_descending,bmp_descending2,bno_descending,state,Apogee_Passed,link2ground,ss);
+    TELEMETRY_SERIAL.print(send1);
+    TELEMETRY_SERIAL.print(send2);
+    TELEMETRY_SERIAL.print(send3);
+    TELEMETRY_SERIAL.println(send4);
+      */
+    
+    //Send Fomat for Python UI (uncomment as needed)
+    // /*
     BEGIN_SEND
     SEND_VECTOR_ITEM(euler_angle  , euler)
     SEND_VECTOR_ITEM(gyro         , gyroscope)
@@ -681,8 +853,13 @@ void loop() {
     SEND_ITEM(land_lon            , land_lon)
 
     SEND_ITEM(Apogee_Passed       , Apogee_Passed)
-
+    SEND_ITEM(run_time            , run_time)
+    SEND_ITEM(status            , String(state) )
+    //SEND_ITEM(status            , char(state) )
+    
     END_SEND
+    // */
+
     radiotimer=millis();
   }
 
@@ -739,85 +916,12 @@ void loop() {
     WRITE_CSV_VECTOR_ITEM(euler)
     WRITE_CSV_VECTOR_ITEM(magnetometer)
     WRITE_CSV_ITEM(link2ground)
+    WRITE_CSV_ITEM(state)
+    WRITE_CSV_ITEM(Apogee_Passed)
 
     dataFile.println();
     dataFile.flush();
     sdtimer=millis();
   }
 
-}
-
-
-
-
-
-
-
-time_t getTeensy3Time()
-{
-  return Teensy3Clock.get();
-}
-
-static void smartDelay(unsigned long ms)
-{
-  unsigned long start = millis();
-  do
-  {
-    while (Serial2.available()){
-      gps.encode(Serial2.read());
-    }
-  } while (millis() - start < ms);
-}
-
-void start_countdown() {
-  #if CONFIGURATION != DEMO
-  if (!ss) {
-    TELEMETRY_SERIAL.println(F("Countdown aborted due to sensor failure"));
-    SET_STATE(STAND_BY) // Set state to signal countdown was aborted
-  } else
-  #endif
-  if (0) {  //replace 0 with any unacceptable initial states
-    TELEMETRY_SERIAL.println(F("Countdown aborted due to unexpected initial state"));
-    SET_STATE(STAND_BY) // Set state to signal countdown was aborted
-  }
-  else {
-    TELEMETRY_SERIAL.println(F("Countdown started"));
-    SET_STATE(TERMINAL_COUNT)
-    start_time = millis();
-    heartbeat();
-  }
-}
-
-void heartbeat() {
-  heartbeat_time = millis();
-}
-
-void write_state(const char *state_name) {
-  SEND(status, state_name);
-}
-
-void abort_autosequence() {   //need to check if data is still logged after an abort is triggered
-  TELEMETRY_SERIAL.println(F("Run aborted"));
-  switch (state) {
-    case STAND_BY:
-    case TERMINAL_COUNT:
-      SET_STATE(STAND_BY)
-      abort_time = millis();
-      break;
-
-    case IS_RISING:
-      //SET_STATE(STAND_BY)
-      abort_time = millis();
-      break;
-
-    case IS_FALLING:
-      //SET_STATE(STAND_BY)
-      abort_time = millis();
-      break;
-
-    case LANDED:
-      SET_STATE(STAND_BY)
-      abort_time = millis();
-      break;
-  }
 }
