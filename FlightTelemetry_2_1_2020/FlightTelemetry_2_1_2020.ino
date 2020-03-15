@@ -92,7 +92,7 @@ TinyGPSPlus gps;
 // 2-5 msgs/s is probably fine for the future, so we want ~600-1500 bytes/s, so no lower than 6000-15000 bits/s baud rate
 //I'm only showing the math here now b/c eventually we will want to lower the radio baud rates to get better range
 #define radio_dt 100 //time in ms between sending telemetry packets
-#define read_dt 1000 //time in ms between recieving telemetry packets
+#define read_dt 100 //time in ms between recieving telemetry packets
 
 
 //BMP388 setup
@@ -302,6 +302,7 @@ void start_countdown() {
     TELEMETRY_SERIAL.println(F("Countdown started"));
     SET_STATE(TERMINAL_COUNT);
     start_time = millis();
+    abort_time= 0;
     heartbeat();
   }
 }
@@ -321,6 +322,8 @@ void abort_autosequence() {   //need to check if data is still logged after an a
     case TERMINAL_COUNT:
       SET_STATE(STAND_BY);
       abort_time = millis();
+      run_time=0;
+      start_time=0;
       break;
 
     case POWERED_ASCENT:
@@ -369,11 +372,13 @@ void setup() {
   while (timeStatus()!= timeSet) {
     TELEMETRY_SERIAL.println(F("Teensy RTC err"));
     digitalWrite(LED,LOW); delay(5000); digitalWrite(LED,HIGH);delay(5000);
+    ss=0;
   }
 
   while (!bmp.begin()) {                         //flashes to signal error
     TELEMETRY_SERIAL.println(F("BMP388 err"));
     digitalWrite(LED,LOW); delay(2000); digitalWrite(LED,HIGH);delay(2000);
+    ss=0;
   }
   bmp.setTemperatureOversampling(BMP3_OVERSAMPLING_8X);
   bmp.setPressureOversampling(BMP3_OVERSAMPLING_4X);
@@ -385,6 +390,7 @@ void setup() {
   while (!bno.begin()) {                         //flashes to signal error
     TELEMETRY_SERIAL.println(F("BNO055 err"));
     digitalWrite(LED,LOW); delay(100); digitalWrite(LED,HIGH);delay(100);
+    ss=0;
   }
   //set BNO mode
   bno.setMode(Adafruit_BNO055::OPERATION_MODE_NDOF);  //OPERATION_MODE_NDOF_FMC_OFF, see .cpp for all modes
@@ -395,6 +401,7 @@ void setup() {
   if (!SD.begin(BUILTIN_SDCARD)){
     TELEMETRY_SERIAL.println(F("SD err"));
     digitalWrite(LED,LOW); delay(500); digitalWrite(LED,HIGH);delay(500);
+    ss=0;
   }
   else {                                            // generates file name
     for (uint16_t nameCount = 0; nameCount < 1000; nameCount++) {
@@ -430,10 +437,29 @@ void setup() {
 
   S1.attach(PWM1);
   //S1.attach(SERVO_PIN_A, 1000, 2000); //some motors need min/max setting ,ESCs go 1k-2k
+  
+  for(int q=0; q<10;q++){
+    digitalWrite(LED,LOW); delay(100); digitalWrite(LED,HIGH);delay(100); 
+  }
+  smartDelay(1000*30);
+  for(int q=0; q<20;q++){
+    digitalWrite(LED,LOW); delay(50); digitalWrite(LED,HIGH);delay(50); 
+  }
+  
+  //Launch_ALT= bmp.readAltitude(SEALEVELPRESSURE_HPA);   //keeps giving 1900m
+  if(gps.satellites.value() > 3){
+    gps_alt= gps.altitude.meters();
+    launch_lat= gps.location.lat();
+    launch_lon= gps.location.lng();
+    land_lat= launch_lat + 0.0002;
+    land_lon= launch_lon + 0.0002;
+  }
 
-
-  smartDelay(1000*15);
+  
 }
+
+
+
 
 
 
@@ -541,7 +567,7 @@ void loop() {
       IS_RISING= 1;
       IS_FALLING= 0;
     }
-    else if( abs(bmp_alt_last_avg - bmp_alt_new_avg) < .3){  //vertical velocity less than .3 m/s
+    else if( abs(bmp_alt_last_avg - bmp_alt_new_avg) < .3){  //vertical velocity less than .3 m over the past avg sec
       IS_RISING= 0;
       IS_FALLING= 0;  
     }
@@ -588,13 +614,14 @@ void loop() {
     gps_e= TinyGPSPlus::distanceBetween(0, launch_lon, 0, gps_lon);
     gps_d=-gps_alt;
 
-    //smartDelay(300);
+    smartDelay(300);
+    /*
     for(int n=0; n < 200 ;n++){ //100-300 is good... ~700 iterations can run per sec
       while (Serial2.available()){
         gps.encode(Serial2.read());
       }
     }
-
+    */
     for (int i=0;i<9;i++){
       gps_alt_new[i+1]=gps_alt_new[i]; //move every element 1 back
     }
@@ -631,6 +658,10 @@ void loop() {
     //state machine:
     if ( (run_time>0) && (state==TERMINAL_COUNT) && (run_time<BURN_TIME) ){
       SET_STATE(POWERED_ASCENT);
+      //launch rocket
+      digitalWrite(PYRO3,HIGH);
+      //DROGUE_FIRED= 1;
+      P3_setting=1;
     }    
     if ( (state==POWERED_ASCENT) && (run_time>BURN_TIME) ){
       SET_STATE(UNPOWERED_ASCENT);
@@ -781,8 +812,8 @@ void loop() {
     }
 
     //both run_time and start_time = 0 until countdown started
-    if(run_time >0 || start_time >0){
-      if(state != LANDED){
+    if((run_time >0) || (start_time >0)){
+      if((state != LANDED) && (abort_time == 0)){
         run_time= millis() - start_time - COUNTDOWN_DURATION;
       }
     }
@@ -855,7 +886,11 @@ void loop() {
 
     SEND_ITEM(Apogee_Passed       , Apogee_Passed)
     SEND_ITEM(run_time            , run_time)
-/*
+    SEND_ITEM(up                  , IS_RISING)
+    SEND_ITEM(down                , IS_FALLING)
+    SEND_ITEM(gps_n               , gps_n)
+    SEND_ITEM(gps_e               , gps_e)
+    
     if(state==STAND_BY){
       SEND_ITEM(status, "STAND_BY" )
     }
@@ -880,8 +915,8 @@ void loop() {
     if(state==LANDED){
       SEND_ITEM(status, "LANDED" )
     }
-    */
-    SEND_ITEM(status            , String(state) )
+    
+    //SEND_ITEM(status            , int(state) )
     //SEND_ITEM(status            , char(state) )
     
     END_SEND
