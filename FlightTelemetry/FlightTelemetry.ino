@@ -6,7 +6,8 @@
 #include <Adafruit_BNO055.h>
 #include <avr/pgmspace.h>
 
-#define TELEMETRY_SERIAL Serial1
+#define TELEMETRY_SERIAL Serial2  //Serial fine for Arduino Boards + Due
+//Teensy 3.6 has to use Serial1 or higher
 #include <Telemetry.h>
 
 Adafruit_BNO055 bno = Adafruit_BNO055(55);
@@ -14,7 +15,10 @@ RTC_DS1307 rtc;
 File dataFile;
 char filename[] = "DATA000.csv";
 
-#define LED           10
+#define LED     BUILTIN_SDCARD  //use BUILTIN_SDCARD for Teensy 3.6
+//also change line ~46 to: 
+//if (!SD.begin(BUILTIN_SDCARD)) { TELEMETRY_SERIAL.println(F("SD err")); }
+//10 (or other) for all other boards)
 
 #define SEND_VECTOR_ITEM(field, value)\
   SEND_ITEM(field, value.x())         \
@@ -33,14 +37,14 @@ unsigned int missed_deadlines = 0;
 
 
 void setup() {
-  TELEMETRY_SERIAL.begin(38400);    TELEMETRY_SERIAL.println();
+  TELEMETRY_SERIAL.begin(57600);    TELEMETRY_SERIAL.println();
   
   while (!bno.begin()) {                            // flashes to signal error
     TELEMETRY_SERIAL.println(F("BNO055 err"));
     digitalWrite(LED,LOW); delay(1000); digitalWrite(LED,HIGH);
   }
   if (!rtc.isrunning()) { rtc.adjust(DateTime(__DATE__, __TIME__)); }
-  if (!SD.begin(10)) { TELEMETRY_SERIAL.println(F("SD err")); }
+  if (!SD.begin(BUILTIN_SDCARD)) { TELEMETRY_SERIAL.println(F("SD err")); }
   else {                                            // generates file name
     for (uint16_t nameCount = 0; nameCount < 1000; nameCount++) {
       filename[4] = nameCount/100 + '0';
